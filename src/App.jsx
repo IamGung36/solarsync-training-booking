@@ -146,7 +146,8 @@ export default function App() {
               location: item.location || '',
               bookingType: 'work',
               isGoogleEvent: true,
-              id: item.id
+              id: item.id,
+              attachments: item.attachments || [] // บันทึกไฟล์แนบจากกูเกิล
             };
           });
           setGoogleEvents(mapped);
@@ -200,7 +201,7 @@ export default function App() {
     setTimeout(() => setSuccessMsg(''), 5000);
   };
 
-  // Helper to upload Base64 images to Google Drive
+  // Robust multipart/related uploader to Google Drive API
   const uploadBase64ToDrive = async (base64Data, filename, token) => {
     // Extract base64 content
     const base64Parts = base64Data.split(',');
@@ -213,30 +214,42 @@ export default function App() {
     }
     const blob = new Blob([ab], { type: mimeType });
 
-    // Create multipart metadata and media
-    const metadata = {
+    const boundary = 'antigravity_multipart_boundary';
+    
+    // Metadata block
+    const metadata = JSON.stringify({
       name: filename,
-      mimeType: mimeType,
-    };
-
-    const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-    form.append('file', blob);
+      mimeType: mimeType
+    });
+    
+    const delimiter = `\r\n--${boundary}\r\n`;
+    const closeDelimiter = `\r\n--${boundary}--`;
+    
+    // Construct headers and parts
+    const metadataHeader = 
+      `${delimiter}Content-Type: application/json; charset=UTF-8\r\n\r\n${metadata}${delimiter}Content-Type: ${mimeType}\r\n\r\n`;
+      
+    const encoder = new TextEncoder();
+    const headerBuffer = encoder.encode(metadataHeader);
+    const footerBuffer = encoder.encode(closeDelimiter);
+    
+    const combinedBlob = new Blob([headerBuffer, blob, footerBuffer], { type: `multipart/related; boundary=${boundary}` });
 
     const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`
       },
-      body: form
+      body: combinedBlob
     });
 
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`Google Drive Upload Error: ${errText}`);
+      throw new Error(`HTTP ${res.status}: ${errText}`);
     }
 
-    return await res.json(); // returns { id, name, webViewLink }
+    return await res.json();
   };
 
   // Direct Booking to Google Calendar with attachments
@@ -255,10 +268,12 @@ export default function App() {
       const subject = event.eventName || event.courseName || 'นัดหมาย My Booking Calendar';
       
       let attachments = [];
+      let uploadSuccess = true;
+      let uploadErrorMessage = '';
       
       // If there is an image, upload to Google Drive first
       if (event.sourceImage) {
-        setSuccessMsg('กำลังอัปโหลดรูปภาพประกอบโปสเตอร์ไปยัง Google Drive...');
+        setSuccessMsg('กำลังอัปโหลดรูปภาพประกอบไปยัง Google Drive...');
         try {
           const filename = `poster-${Date.now()}-${(event.eventName || 'event').replace(/[^a-zA-Z0-9]/g, '_')}.jpg`;
           const driveFile = await uploadBase64ToDrive(event.sourceImage, filename, googleAccessToken);
@@ -268,12 +283,11 @@ export default function App() {
               title: 'ภาพโปสเตอร์นัดหมาย.jpg',
               mimeType: 'image/jpeg'
             });
-            setSuccessMsg('อัปโหลดภาพประกอบสำเร็จ กำลังดำเนินการสร้างนัดหมายใน Google Calendar...');
           }
         } catch (uploadErr) {
-          console.warn("Failed to upload image to Google Drive:", uploadErr);
-          // Don't block event creation entirely, notify and continue with just text
-          setErrorMsg(`ไม่สามารถอัปโหลดรูปภาพประกอบไปยัง Google Drive ได้: ${uploadErr.message || uploadErr} (ระบบจะบันทึกตัวนัดหมายแบบไม่มีรูปประกอบให้ก่อน)`);
+          console.error("Failed to upload image to Google Drive:", uploadErr);
+          uploadSuccess = false;
+          uploadErrorMessage = uploadErr.message || String(uploadErr);
         }
       }
       
@@ -305,7 +319,7 @@ export default function App() {
         requestBody.attachments = attachments;
       }
       
-      // supportsAttachments=true query param is required in API URL for attachments to load correctly
+      setSuccessMsg('กำลังบันทึกข้อมูลนัดหมายไปยัง Google Calendar...');
       const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?supportsAttachments=true', {
         method: 'POST',
         headers: {
@@ -320,7 +334,14 @@ export default function App() {
         throw new Error(errData.error?.message || `HTTP ${response.status}`);
       }
       
-      setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงใน Google Calendar พร้อมรูปภาพประกอบเรียบร้อยแล้ว!`);
+      if (uploadSuccess && event.sourceImage) {
+        setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงใน Google Calendar พร้อมไฟล์แนบภาพโปสเตอร์เรียบร้อยแล้ว!`);
+      } else if (event.sourceImage) {
+        setErrorMsg(`บันทึกนัดหมายสำเร็จ แต่การแนบรูปภาพล้มเหลว: ${uploadErrorMessage} (กรุณาเปิดบริการ Google Drive API ใน Google Cloud Console)`);
+      } else {
+        setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงใน Google Calendar เรียบร้อยแล้ว!`);
+      }
+      
       fetchGoogleEvents(googleAccessToken);
     } catch (err) {
       console.error("Google Calendar API Error:", err);
@@ -1269,6 +1290,29 @@ export default function App() {
                       {event.sourceImage && (
                         <div className="mb-4 rounded-lg overflow-hidden border border-slate-200 bg-white flex justify-center shadow-inner">
                           <img src={event.sourceImage} alt="Training Poster" className="max-h-64 w-full object-contain" />
+                        </div>
+                      )}
+
+                      {/* Google Event Attachments display if available */}
+                      {event.isGoogleEvent && event.attachments && event.attachments.length > 0 && (
+                        <div className="mb-4 p-3 bg-white/70 rounded-xl border border-emerald-100 text-xs">
+                          <span className="text-[11px] font-bold text-emerald-800 block mb-2 flex items-center gap-1">
+                            📎 ไฟล์แนบของกิจกรรม (คลิกเพื่อเปิดดู):
+                          </span>
+                          <div className="space-y-1.5">
+                            {event.attachments.map((att, attIdx) => (
+                              <a 
+                                key={attIdx} 
+                                href={att.fileUrl} 
+                                target="_blank" 
+                                rel="noreferrer"
+                                className="flex items-center gap-1.5 text-emerald-700 hover:text-emerald-950 hover:underline font-semibold"
+                              >
+                                <ImageIcon className="w-3.5 h-3.5 text-emerald-600" />
+                                {att.title || 'ไฟล์แนบ'}
+                              </a>
+                            ))}
+                          </div>
                         </div>
                       )}
 
