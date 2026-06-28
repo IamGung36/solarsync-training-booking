@@ -45,8 +45,8 @@ export default function App() {
 
   // LINE Settings States
   const [uploadedImage, setUploadedImage] = useState(null);
-  const [lineAccessToken, setLineAccessToken] = useState(localStorage.getItem('line_access_token') || localStorage.getItem('line_token') || '');
-  const [lineUserId, setLineUserId] = useState(localStorage.getItem('line_user_id') || '');
+  const [lineAccessToken, setLineAccessToken] = useState(localStorage.getItem('line_access_token') || localStorage.getItem('line_token') || 'VE6pRAQO6w7nKGvGPrpUmSuFZZb5n8+FciujImJMAIEqPbjHGMBF4aI6sOY+A3XME0trehIxYBNswHObwUFjIVK0MV0E7b6BL9NaqkdzR0JHnrYAjgpD7GZ147O4CujXQ9270Onm/aL05XKFapXl1AdB04t89/1O/w1cDnyilFU=');
+  const [lineUserId, setLineUserId] = useState(localStorage.getItem('line_user_id') || 'gung1125');
   const [notifyDays, setNotifyDays] = useState(1);
   const [notifiedLog, setNotifiedLog] = useState(new Set()); 
   const [showSettings, setShowSettings] = useState(false);
@@ -75,7 +75,7 @@ export default function App() {
   });
   const [manualImageFile, setManualImageFile] = useState(null);
 
-  // Set default MS configuration on first mount if not already set
+  // Set default MS and LINE configuration on first mount if not already set
   useEffect(() => {
     if (!localStorage.getItem('ms_client_id')) {
       localStorage.setItem('ms_client_id', '5073bf5c-1947-460d-8dd0-de9b883343d9');
@@ -84,6 +84,14 @@ export default function App() {
     if (!localStorage.getItem('ms_tenant_id') || localStorage.getItem('ms_tenant_id') === 'common') {
       localStorage.setItem('ms_tenant_id', 'c8445030-e602-4993-a805-7e41f70338e8');
       setMsTenantId('c8445030-e602-4993-a805-7e41f70338e8');
+    }
+    if (!localStorage.getItem('line_access_token')) {
+      localStorage.setItem('line_access_token', 'VE6pRAQO6w7nKGvGPrpUmSuFZZb5n8+FciujImJMAIEqPbjHGMBF4aI6sOY+A3XME0trehIxYBNswHObwUFjIVK0MV0E7b6BL9NaqkdzR0JHnrYAjgpD7GZ147O4CujXQ9270Onm/aL05XKFapXl1AdB04t89/1O/w1cDnyilFU=');
+      setLineAccessToken('VE6pRAQO6w7nKGvGPrpUmSuFZZb5n8+FciujImJMAIEqPbjHGMBF4aI6sOY+A3XME0trehIxYBNswHObwUFjIVK0MV0E7b6BL9NaqkdzR0JHnrYAjgpD7GZ147O4CujXQ9270Onm/aL05XKFapXl1AdB04t89/1O/w1cDnyilFU=');
+    }
+    if (!localStorage.getItem('line_user_id')) {
+      localStorage.setItem('line_user_id', 'gung1125');
+      setLineUserId('gung1125');
     }
   }, []);
 
