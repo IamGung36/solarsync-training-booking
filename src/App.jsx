@@ -174,7 +174,7 @@ export default function App() {
     localStorage.setItem('google_client_id', googleClientId);
     
     const redirectUri = window.location.origin + window.location.pathname;
-    const scope = encodeURIComponent('https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/userinfo.email');
+    const scope = encodeURIComponent('https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/drive.file');
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scope}&prompt=consent`;
     
     window.location.href = authUrl;
@@ -200,7 +200,46 @@ export default function App() {
     setTimeout(() => setSuccessMsg(''), 5000);
   };
 
-  // Direct Booking to Google Calendar
+  // Helper to upload Base64 images to Google Drive
+  const uploadBase64ToDrive = async (base64Data, filename, token) => {
+    // Extract base64 content
+    const base64Parts = base64Data.split(',');
+    const mimeType = base64Parts[0].match(/:(.*?);/)[1];
+    const byteString = atob(base64Parts[1]);
+    const ab = new ArrayBuffer(byteString.length);
+    const ia = new Uint8Array(ab);
+    for (let i = 0; i < byteString.length; i++) {
+      ia[i] = byteString.charCodeAt(i);
+    }
+    const blob = new Blob([ab], { type: mimeType });
+
+    // Create multipart metadata and media
+    const metadata = {
+      name: filename,
+      mimeType: mimeType,
+    };
+
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    form.append('file', blob);
+
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: form
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Google Drive Upload Error: ${errText}`);
+    }
+
+    return await res.json(); // returns { id, name, webViewLink }
+  };
+
+  // Direct Booking to Google Calendar with attachments
   const bookDirectGoogle = async (event) => {
     if (!googleAccessToken) {
       setErrorMsg('กรุณาเชื่อมต่อ Google Calendar ก่อนดำเนินการบันทึก');
@@ -214,6 +253,29 @@ export default function App() {
     try {
       const { start, end } = parseEventDateTime(event.date, event.time);
       const subject = event.eventName || event.courseName || 'นัดหมาย My Booking Calendar';
+      
+      let attachments = [];
+      
+      // If there is an image, upload to Google Drive first
+      if (event.sourceImage) {
+        setSuccessMsg('กำลังอัปโหลดรูปภาพประกอบโปสเตอร์ไปยัง Google Drive...');
+        try {
+          const filename = `poster-${Date.now()}-${(event.eventName || 'event').replace(/[^a-zA-Z0-9]/g, '_')}.jpg`;
+          const driveFile = await uploadBase64ToDrive(event.sourceImage, filename, googleAccessToken);
+          if (driveFile && driveFile.webViewLink) {
+            attachments.push({
+              fileUrl: driveFile.webViewLink,
+              title: 'ภาพโปสเตอร์นัดหมาย.jpg',
+              mimeType: 'image/jpeg'
+            });
+            setSuccessMsg('อัปโหลดภาพประกอบสำเร็จ กำลังดำเนินการสร้างนัดหมายใน Google Calendar...');
+          }
+        } catch (uploadErr) {
+          console.warn("Failed to upload image to Google Drive:", uploadErr);
+          // Don't block event creation entirely, notify and continue with just text
+          setErrorMsg(`ไม่สามารถอัปโหลดรูปภาพประกอบไปยัง Google Drive ได้: ${uploadErr.message || uploadErr} (ระบบจะบันทึกตัวนัดหมายแบบไม่มีรูปประกอบให้ก่อน)`);
+        }
+      }
       
       const bodyContent = `ชื่องาน: ${event.eventName || '-'}\n` +
                           `คอร์ส: ${event.courseName || '-'}\n` +
@@ -238,8 +300,13 @@ export default function App() {
         },
         location: event.location || 'ไม่ได้ระบุสถานที่'
       };
+
+      if (attachments.length > 0) {
+        requestBody.attachments = attachments;
+      }
       
-      const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+      // supportsAttachments=true query param is required in API URL for attachments to load correctly
+      const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?supportsAttachments=true', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${googleAccessToken}`,
@@ -253,7 +320,7 @@ export default function App() {
         throw new Error(errData.error?.message || `HTTP ${response.status}`);
       }
       
-      setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงใน Google Calendar เรียบร้อยแล้ว!`);
+      setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงใน Google Calendar พร้อมรูปภาพประกอบเรียบร้อยแล้ว!`);
       fetchGoogleEvents(googleAccessToken);
     } catch (err) {
       console.error("Google Calendar API Error:", err);
@@ -703,9 +770,9 @@ export default function App() {
                       className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-400"
                     />
                   </div>
-                  <p className="text-xs text-slate-400">
-                    *สิทธิ์ (Scopes): แอปพลิเคชันใช้สิทธิ์ `calendar.events` (เขียนนัดหมาย) และ `calendar.readonly` (อ่านนัดหมาย)<br/>
-                    *Redirect URI ใน Google Console: <code className="bg-slate-900 px-1 py-0.5 rounded text-emerald-300">{window.location.origin + window.location.pathname}</code>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    *สิทธิ์ (Scopes): แอปพลิเคชันใช้สิทธิ์ <code className="bg-slate-900 px-1 py-0.5 rounded text-emerald-300">calendar.events</code> (เขียนนัดหมาย), <code className="bg-slate-900 px-1 py-0.5 rounded text-emerald-300">calendar.readonly</code> (อ่านนัดหมาย) และ <code className="bg-slate-900 px-1 py-0.5 rounded text-emerald-300">drive.file</code> (อัปโหลดรูปภาพแนบใน Google Drive)<br/>
+                    *Redirect URI ใน Google Console: <code className="bg-slate-900 px-1.5 py-0.5 rounded text-emerald-300 font-mono text-[11px]">{window.location.origin + window.location.pathname}</code>
                   </p>
                 </div>
               </div>
