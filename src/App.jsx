@@ -37,8 +37,8 @@ export default function App() {
   const [notifyStatus, setNotifyStatus] = useState(null);
 
   // ใหม่: MSAL/Microsoft states
-  const [msClientId, setMsClientId] = useState(localStorage.getItem('ms_client_id') || '');
-  const [msTenantId, setMsTenantId] = useState(localStorage.getItem('ms_tenant_id') || 'common');
+  const [msClientId, setMsClientId] = useState(localStorage.getItem('ms_client_id') || '5073bf5c-1947-460d-8dd0-de9b883343d9');
+  const [msTenantId, setMsTenantId] = useState(localStorage.getItem('ms_tenant_id') || 'c8445030-e602-4993-a805-7e41f70338e8');
   const [msAccount, setMsAccount] = useState(null);
   const [msAccessToken, setMsAccessToken] = useState('');
   const [isMsSyncing, setIsMsSyncing] = useState(false);
@@ -56,6 +56,18 @@ export default function App() {
     joinLink: '',
   });
   const [manualImageFile, setManualImageFile] = useState(null);
+
+  // Set default MS configuration on first mount if not already set
+  useEffect(() => {
+    if (!localStorage.getItem('ms_client_id')) {
+      localStorage.setItem('ms_client_id', '5073bf5c-1947-460d-8dd0-de9b883343d9');
+      setMsClientId('5073bf5c-1947-460d-8dd0-de9b883343d9');
+    }
+    if (!localStorage.getItem('ms_tenant_id') || localStorage.getItem('ms_tenant_id') === 'common') {
+      localStorage.setItem('ms_tenant_id', 'c8445030-e602-4993-a805-7e41f70338e8');
+      setMsTenantId('c8445030-e602-4993-a805-7e41f70338e8');
+    }
+  }, []);
 
   // Check active Microsoft session on startup
   useEffect(() => {
