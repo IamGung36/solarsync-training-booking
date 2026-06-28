@@ -32,10 +32,15 @@ export default function App() {
   const [notifyStatus, setNotifyStatus] = useState(null);
 
   // Google Calendar API States
-  const [googleClientId, setGoogleClientId] = useState(localStorage.getItem('google_client_id') || '560877969894-sptd7494hbf1c8mfg3g78qj6d8cr6nfa.apps.googleusercontent.com'); // Default default project ID or blank
+  const [googleClientId, setGoogleClientId] = useState(localStorage.getItem('google_client_id') || '560877969894-sptd7494hbf1c8mfg3g78qj6d8cr6nfa.apps.googleusercontent.com');
   const [googleAccessToken, setGoogleAccessToken] = useState(localStorage.getItem('google_access_token') || '');
   const [googleAccount, setGoogleAccount] = useState(localStorage.getItem('google_user_email') || null);
   const [isGoogleSyncing, setIsGoogleSyncing] = useState(false);
+
+  // Hidden Events State
+  const [hiddenEventIds, setHiddenEventIds] = useState(() => {
+    return JSON.parse(localStorage.getItem('hidden_event_ids') || '[]');
+  });
 
   // Manual Event Form States
   const [showManualForm, setShowManualForm] = useState(false);
@@ -185,6 +190,16 @@ export default function App() {
     setSuccessMsg('ออกจากระบบ Google Calendar เรียบร้อยแล้ว');
   };
 
+  // Hide specific event from calendar
+  const handleHideEvent = (eventId) => {
+    if (!eventId) return;
+    const updated = [...hiddenEventIds, eventId];
+    setHiddenEventIds(updated);
+    localStorage.setItem('hidden_event_ids', JSON.stringify(updated));
+    setSuccessMsg('ซ่อนกิจกรรมนี้จากปฏิทินเรียบร้อยแล้ว (กู้คืนได้ในเมนูตั้งค่า)');
+    setTimeout(() => setSuccessMsg(''), 5000);
+  };
+
   // Direct Booking to Google Calendar
   const bookDirectGoogle = async (event) => {
     if (!googleAccessToken) {
@@ -316,7 +331,8 @@ export default function App() {
             const eventsWithImage = parsedData.events.map(e => ({ 
               ...e, 
               bookingType: 'work',
-              sourceImage: base64Image 
+              sourceImage: base64Image,
+              id: `extracted-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
             }));
             setEvents(prev => [...prev, ...eventsWithImage]);
             setSuccessMsg('ดึงข้อมูลและเพิ่มลงในปฏิทินเรียบร้อยแล้ว!');
@@ -454,11 +470,11 @@ export default function App() {
     days.push(i);
   }
 
-  // รวมกิจกรรมทั้ง Local และ Google Calendar
+  // รวมกิจกรรมทั้ง Local และ Google Calendar (หักรายการที่ซ่อนออก)
   const getEventsForDate = (dateStr) => {
     const local = events.filter(e => e.date === dateStr);
     const google = googleEvents.filter(e => e.date === dateStr);
-    return [...local, ...google];
+    return [...local, ...google].filter(e => !hiddenEventIds.includes(e.id));
   };
 
   const formatDateString = (year, month, day) => {
@@ -693,6 +709,29 @@ export default function App() {
                   </p>
                 </div>
               </div>
+
+              {/* Restore Hidden Events Feature */}
+              {hiddenEventIds.length > 0 && (
+                <div className="border-t border-slate-700 pt-4 animate-in fade-in">
+                  <h2 className="text-md font-semibold flex items-center gap-2 mb-2 text-amber-400">
+                    🔄 กู้คืนกิจกรรมที่ซ่อนอยู่
+                  </h2>
+                  <p className="text-xs text-slate-300 mb-3">
+                    ขณะนี้คุณซ่อนกิจกรรมการนัดหมายไว้ทั้งหมด {hiddenEventIds.length} รายการ
+                  </p>
+                  <button 
+                    onClick={() => {
+                      setHiddenEventIds([]);
+                      localStorage.setItem('hidden_event_ids', JSON.stringify([]));
+                      setSuccessMsg('กู้คืนกิจกรรมที่ซ่อนอยู่ทั้งหมดสำเร็จแล้ว!');
+                      setTimeout(() => setSuccessMsg(''), 5000);
+                    }}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm"
+                  >
+                    แสดงกิจกรรมที่ซ่อนทั้งหมดอีกครั้ง
+                  </button>
+                </div>
+              )}
             </section>
           )}
 
@@ -897,7 +936,8 @@ export default function App() {
                         registerLink: manualEvent.registerLink,
                         joinLink: manualEvent.joinLink,
                         bookingType: manualEvent.bookingType,
-                        sourceImage: manualImageFile 
+                        sourceImage: manualImageFile,
+                        id: `local-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
                       };
 
                       setEvents(prev => [...prev, newEvent]);
@@ -1107,46 +1147,55 @@ export default function App() {
                           {event.isGoogleEvent ? '🟢 Google Calendar' : isPersonal ? '🏠 Booking ส่วนตัว' : '💼 Booking ที่ทำงาน'}
                         </span>
                         
-                        {!event.isGoogleEvent && (
-                          <div className="flex gap-2 text-xs">
-                            <button 
-                              onClick={() => {
-                                setEvents(prev => prev.map((ev) => {
-                                  if (ev === event) {
-                                    return { ...ev, bookingType: isPersonal ? 'work' : 'personal' };
+                        <div className="flex gap-2 text-xs">
+                          {!event.isGoogleEvent && (
+                            <>
+                              <button 
+                                onClick={() => {
+                                  setEvents(prev => prev.map((ev) => {
+                                    if (ev === event) {
+                                      return { ...ev, bookingType: isPersonal ? 'work' : 'personal' };
+                                    }
+                                    return ev;
+                                  }));
+                                }}
+                                className="text-slate-500 hover:text-slate-700 underline font-semibold transition-colors"
+                              >
+                                สลับประเภท
+                              </button>
+                              <span className="text-slate-300">|</span>
+                              <button 
+                                onClick={() => {
+                                  setEditingEvent(event);
+                                  setEditDate(event.date);
+                                  setEditTime(event.time || '');
+                                }}
+                                className="text-slate-500 hover:text-slate-700 underline font-semibold transition-colors"
+                              >
+                                แก้ไขวัน/เวลา
+                              </button>
+                              <span className="text-slate-300">|</span>
+                              <button 
+                                onClick={() => {
+                                  if (window.confirm(`คุณต้องการลบกิจกรรม "${event.eventName || 'ไม่มีชื่องาน'}" ใช่หรือไม่?`)) {
+                                    setEvents(prev => prev.filter(ev => ev !== event));
+                                    setSuccessMsg('ลบการนัดหมายเรียบร้อยแล้ว');
                                   }
-                                  return ev;
-                                }));
-                              }}
-                              className="text-slate-500 hover:text-slate-700 underline font-semibold transition-colors"
-                            >
-                              สลับประเภท
-                            </button>
-                            <span className="text-slate-300">|</span>
-                            <button 
-                              onClick={() => {
-                                setEditingEvent(event);
-                                setEditDate(event.date);
-                                setEditTime(event.time || '');
-                              }}
-                              className="text-slate-500 hover:text-slate-700 underline font-semibold transition-colors"
-                            >
-                              แก้ไขวัน/เวลา
-                            </button>
-                            <span className="text-slate-300">|</span>
-                            <button 
-                              onClick={() => {
-                                if (window.confirm(`คุณต้องการลบกิจกรรม "${event.eventName || 'ไม่มีชื่องาน'}" ใช่หรือไม่?`)) {
-                                  setEvents(prev => prev.filter(ev => ev !== event));
-                                  setSuccessMsg('ลบการนัดหมายเรียบร้อยแล้ว');
-                                }
-                              }}
-                              className="text-red-500 hover:text-red-700 underline font-semibold transition-colors"
-                            >
-                              ลบ
-                            </button>
-                          </div>
-                        )}
+                                }}
+                                className="text-red-500 hover:text-red-700 underline font-semibold transition-colors"
+                              >
+                                ลบ
+                              </button>
+                              <span className="text-slate-300">|</span>
+                            </>
+                          )}
+                          <button 
+                            onClick={() => handleHideEvent(event.id)}
+                            className="text-amber-600 hover:text-amber-800 underline font-semibold transition-colors"
+                          >
+                            ซ่อนจากปฏิทิน
+                          </button>
+                        </div>
                       </div>
 
                       {/* Poster Image if available */}
