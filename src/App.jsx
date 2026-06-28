@@ -3,9 +3,9 @@ import { Calendar, Upload, MapPin, Clock, Link as LinkIcon, BookOpen, Loader2, C
 import { PublicClientApplication } from "@azure/msal-browser";
 
 // MSAL Initialization helper
-const initializeMsal = async (clientId, tenantId = 'c8445030-e602-4993-a805-7e41f70338e8') => {
+const initializeMsal = async (clientId, tenantId = 'cb445030-e602-4993-a605-7e41f70338e8') => {
   const finalClientId = clientId || '5073bf5c-1947-460d-8dd0-de9b883343d9';
-  const finalTenantId = (!tenantId || tenantId === 'common') ? 'c8445030-e602-4993-a805-7e41f70338e8' : tenantId;
+  const finalTenantId = (!tenantId || tenantId === 'common') ? 'cb445030-e602-4993-a605-7e41f70338e8' : tenantId;
 
   const msalConfig = {
     auth: {
@@ -55,7 +55,7 @@ export default function App() {
 
   // Microsoft OAuth States
   const [msClientId, setMsClientId] = useState(localStorage.getItem('ms_client_id') || '5073bf5c-1947-460d-8dd0-de9b883343d9');
-  const [msTenantId, setMsTenantId] = useState(localStorage.getItem('ms_tenant_id') || 'c8445030-e602-4993-a805-7e41f70338e8');
+  const [msTenantId, setMsTenantId] = useState(localStorage.getItem('ms_tenant_id') || 'cb445030-e602-4993-a605-7e41f70338e8');
   const [msAccount, setMsAccount] = useState(null);
   const [msAccessToken, setMsAccessToken] = useState('');
   const [isMsSyncing, setIsMsSyncing] = useState(false);
@@ -87,9 +87,10 @@ export default function App() {
       localStorage.setItem('ms_client_id', '5073bf5c-1947-460d-8dd0-de9b883343d9');
       setMsClientId('5073bf5c-1947-460d-8dd0-de9b883343d9');
     }
-    if (!localStorage.getItem('ms_tenant_id') || localStorage.getItem('ms_tenant_id') === 'common') {
-      localStorage.setItem('ms_tenant_id', 'c8445030-e602-4993-a805-7e41f70338e8');
-      setMsTenantId('c8445030-e602-4993-a805-7e41f70338e8');
+    const curTenant = localStorage.getItem('ms_tenant_id');
+    if (!curTenant || curTenant === 'common' || curTenant === 'c8445030-e602-4993-a805-7e41f70338e8' || curTenant === '') {
+      localStorage.setItem('ms_tenant_id', 'cb445030-e602-4993-a605-7e41f70338e8');
+      setMsTenantId('cb445030-e602-4993-a605-7e41f70338e8');
     }
     if (!localStorage.getItem('line_access_token')) {
       localStorage.setItem('line_access_token', 'VE6pRAQO6w7nKGvGPrpUmSuFZZb5n8+FciujImJMAIEqPbjHGMBF4aI6sOY+A3XME0trehIxYBNswHObwUFjIVK0MV0E7b6BL9NaqkdzR0JHnrYAjgpD7GZ147O4CujXQ9270Onm/aL05XKFapXl1AdB04t89/1O/w1cDnyilFU=');
