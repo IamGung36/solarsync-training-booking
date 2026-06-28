@@ -3,11 +3,11 @@ import { Calendar, Upload, MapPin, Clock, Link as LinkIcon, BookOpen, Loader2, C
 import { PublicClientApplication } from "@azure/msal-browser";
 
 // MSAL Initialization helper
-const initializeMsal = async (clientId) => {
+const initializeMsal = async (clientId, tenantId = 'common') => {
   const msalConfig = {
     auth: {
       clientId: clientId,
-      authority: "https://login.microsoftonline.com/common",
+      authority: `https://login.microsoftonline.com/${tenantId || 'common'}`,
       redirectUri: window.location.origin + window.location.pathname,
     },
     cache: {
@@ -38,6 +38,7 @@ export default function App() {
 
   // ใหม่: MSAL/Microsoft states
   const [msClientId, setMsClientId] = useState(localStorage.getItem('ms_client_id') || '');
+  const [msTenantId, setMsTenantId] = useState(localStorage.getItem('ms_tenant_id') || 'common');
   const [msAccount, setMsAccount] = useState(null);
   const [msAccessToken, setMsAccessToken] = useState('');
   const [isMsSyncing, setIsMsSyncing] = useState(false);
@@ -61,7 +62,7 @@ export default function App() {
     const checkActiveSession = async () => {
       if (!msClientId) return;
       try {
-        const pca = await initializeMsal(msClientId);
+        const pca = await initializeMsal(msClientId, msTenantId);
         const accounts = pca.getAllAccounts();
         if (accounts.length > 0) {
           pca.setActiveAccount(accounts[0]);
@@ -76,7 +77,7 @@ export default function App() {
       }
     };
     checkActiveSession();
-  }, [msClientId]);
+  }, [msClientId, msTenantId]);
 
   // Microsoft Login / Logout handlers
   const handleMicrosoftLogin = async () => {
@@ -90,7 +91,7 @@ export default function App() {
     setSuccessMsg('');
     
     try {
-      const pca = await initializeMsal(msClientId);
+      const pca = await initializeMsal(msClientId, msTenantId);
       const loginRequest = {
         scopes: ["User.Read", "Calendars.ReadWrite"],
         prompt: "select_account"
@@ -562,7 +563,7 @@ export default function App() {
                 <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
                   <Calendar className="w-5 h-5 text-blue-400" /> ตั้งค่าเชื่อมต่อ Microsoft Calendar
                 </h2>
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
                   <div>
                     <label className="block text-sm text-slate-300 mb-1">Application (client) ID</label>
                     <input 
@@ -572,15 +573,28 @@ export default function App() {
                         setMsClientId(e.target.value);
                         localStorage.setItem('ms_client_id', e.target.value);
                       }}
-                      placeholder="คัดลอก Client ID จาก Azure Portal มาวาง..."
+                      placeholder="คัดลอก Client ID จาก Azure Portal..."
                       className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-400"
                     />
                   </div>
-                  <p className="text-xs text-slate-400">
-                    *ต้องการรหัสเพื่อเปิดการทำงาน MS Authentication ในแอปพลิเคชัน SPA. 
-                    ตั้งค่า Redirect URIs ใน Azure AD: <code className="bg-slate-900 px-1 py-0.5 rounded text-blue-300">{window.location.origin + window.location.pathname}</code>
-                  </p>
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-1">Directory (tenant) ID</label>
+                    <input 
+                      type="text" 
+                      value={msTenantId}
+                      onChange={(e) => {
+                        setMsTenantId(e.target.value);
+                        localStorage.setItem('ms_tenant_id', e.target.value);
+                      }}
+                      placeholder="ค่าเริ่มต้นคือ common (หรือระบุ Tenant ID สำหรับ Single Tenant)"
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-400"
+                    />
+                  </div>
                 </div>
+                <p className="text-xs text-slate-400">
+                  *สิทธิ์ (Permissions): แอปพลิเคชันต้องการสิทธิ์แบบ Delegated `Calendars.ReadWrite` and `User.Read`<br/>
+                  *ตั้งค่า Redirect URIs ใน Azure Portal: <code className="bg-slate-900 px-1 py-0.5 rounded text-blue-300">{window.location.origin + window.location.pathname}</code>
+                </p>
               </div>
             </section>
           )}
