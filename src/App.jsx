@@ -5,7 +5,7 @@ import { PublicClientApplication } from "@azure/msal-browser";
 // MSAL Initialization helper
 const initializeMsal = async (clientId, tenantId = 'cb445030-e602-4993-a605-7e41f70338e8') => {
   const finalClientId = clientId || '5073bf5c-1947-460d-8dd0-de9b883343d9';
-  const finalTenantId = (!tenantId || tenantId === 'common') ? 'cb445030-e602-4993-a605-7e41f70338e8' : tenantId;
+  const finalTenantId = (!tenantId || tenantId === 'common' || tenantId === 'c8445030-e602-4993-a805-7e41f70338e8') ? 'cb445030-e602-4993-a605-7e41f70338e8' : tenantId;
 
   const msalConfig = {
     auth: {
