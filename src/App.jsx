@@ -1,27 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Upload, MapPin, Clock, Link as LinkIcon, BookOpen, Loader2, ChevronLeft, ChevronRight, Sun, FileText, Video, Bell, Image as ImageIcon, Settings, Check, X, Plus } from 'lucide-react';
-import { PublicClientApplication } from "@azure/msal-browser";
-
-// MSAL Initialization helper
-const initializeMsal = async (clientId, tenantId = 'cb445030-e602-4993-a605-7e41f70338e8') => {
-  const finalClientId = clientId || '5073bf5c-1947-460d-8dd0-de9b883343d9';
-  const finalTenantId = (!tenantId || tenantId === 'common' || tenantId === 'c8445030-e602-4993-a805-7e41f70338e8') ? 'cb445030-e602-4993-a605-7e41f70338e8' : tenantId;
-
-  const msalConfig = {
-    auth: {
-      clientId: finalClientId,
-      authority: `https://login.microsoftonline.com/${finalTenantId}`,
-      redirectUri: window.location.origin + window.location.pathname,
-    },
-    cache: {
-      cacheLocation: "sessionStorage",
-      storeAuthStateInCookie: false,
-    }
-  };
-  const pca = new PublicClientApplication(msalConfig);
-  await pca.initialize();
-  return pca;
-};
 
 // Formatting date to Thai locale but using Gregorian Calendar (ค.ศ.)
 const formatDisplayDate = (dateStr) => {
@@ -35,115 +13,9 @@ const formatDisplayDate = (dateStr) => {
   });
 };
 
-// iCalendar (.ics) Parser Helper
-const parseICS = (icsText) => {
-  const eventsList = [];
-  const lines = icsText.split(/\r?\n/);
-  let currentEvent = null;
-  let inEvent = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    
-    // Handle folded lines
-    while (i + 1 < lines.length && (lines[i+1].startsWith(' ') || lines[i+1].startsWith('\t'))) {
-      line += lines[i+1].substring(1);
-      i++;
-    }
-
-    if (line.startsWith('BEGIN:VEVENT')) {
-      currentEvent = {};
-      inEvent = true;
-    } else if (line.startsWith('END:VEVENT')) {
-      if (currentEvent && currentEvent.dtstart) {
-        const dtstartRaw = currentEvent.dtstart;
-        const dtendRaw = currentEvent.dtend || dtstartRaw;
-        
-        const dateMatch = dtstartRaw.match(/(\d{4})(\d{2})(\d{2})/);
-        if (dateMatch) {
-          const y = dateMatch[1];
-          const m = dateMatch[2];
-          const d = dateMatch[3];
-          const dateStr = `${y}-${m}-${d}`;
-          
-          let timeStr = 'ทั้งวัน';
-          const timeMatchStart = dtstartRaw.match(/T(\d{2})(\d{2})/);
-          if (timeMatchStart) {
-            const sh = timeMatchStart[1];
-            const sm = timeMatchStart[2];
-            let eh = String(parseInt(sh) + 1).padStart(2, '0');
-            let em = sm;
-            
-            if (dtendRaw) {
-              const timeMatchEnd = dtendRaw.match(/T(\d{2})(\d{2})/);
-              if (timeMatchEnd) {
-                eh = timeMatchEnd[1];
-                em = timeMatchEnd[2];
-              }
-            }
-            
-            if (dtstartRaw.endsWith('Z')) {
-              // Convert UTC to local (+07:00 SE Asia)
-              const utcDate = new Date(`${y}-${m}-${d}T${sh}:${sm}:00Z`);
-              const localY = utcDate.getFullYear();
-              const localM = String(utcDate.getMonth() + 1).padStart(2, '0');
-              const localD = String(utcDate.getDate()).padStart(2, '0');
-              const localSH = String(utcDate.getHours()).padStart(2, '0');
-              const localSM = String(utcDate.getMinutes()).padStart(2, '0');
-              
-              const localEndDate = new Date(`${y}-${m}-${d}T${eh}:${em}:00Z`);
-              const localEH = String(localEndDate.getHours()).padStart(2, '0');
-              const localEM = String(localEndDate.getMinutes()).padStart(2, '0');
-              
-              currentEvent.date = `${localY}-${localM}-${localD}`;
-              timeStr = `${localSH}:${localSM} - ${localEH}:${localEM} น.`;
-            } else {
-              currentEvent.date = dateStr;
-              timeStr = `${sh}:${sm} - ${eh}:${em} น.`;
-            }
-          } else {
-            currentEvent.date = dateStr;
-          }
-          
-          eventsList.push({
-            eventName: currentEvent.summary || 'ไม่มีชื่องาน',
-            topic: currentEvent.description || '',
-            date: currentEvent.date,
-            time: timeStr,
-            location: currentEvent.location || '',
-            bookingType: 'work',
-            isMsEvent: true, // Tag it so we style it as Microsoft event
-            id: currentEvent.uid || String(Math.random())
-          });
-        }
-      }
-      inEvent = false;
-      currentEvent = null;
-    } else if (inEvent) {
-      if (line.startsWith('SUMMARY:')) {
-        currentEvent.summary = line.substring(8).replace(/\\,/g, ',').replace(/\\;/g, ';');
-      } else if (line.startsWith('DESCRIPTION:')) {
-        currentEvent.description = line.substring(12).replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';');
-      } else if (line.startsWith('LOCATION:')) {
-        currentEvent.location = line.substring(9).replace(/\\,/g, ',').replace(/\\;/g, ';');
-      } else if (line.startsWith('DTSTART')) {
-        const parts = line.split(':');
-        currentEvent.dtstart = parts[parts.length - 1];
-      } else if (line.startsWith('DTEND')) {
-        const parts = line.split(':');
-        currentEvent.dtend = parts[parts.length - 1];
-      } else if (line.startsWith('UID:')) {
-        currentEvent.uid = line.substring(4);
-      }
-    }
-  }
-  return eventsList;
-};
-
 export default function App() {
   const [events, setEvents] = useState([]);
-  const [msEvents, setMsEvents] = useState([]); // กิจกรรมจาก MSAL OAuth
-  const [icsEvents, setIcsEvents] = useState([]); // กิจกรรมจาก Public ICS Link
+  const [googleEvents, setGoogleEvents] = useState([]); // กิจกรรมจาก Google Calendar
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
@@ -159,15 +31,11 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [notifyStatus, setNotifyStatus] = useState(null);
 
-  // Microsoft OAuth States
-  const [msClientId, setMsClientId] = useState(localStorage.getItem('ms_client_id') || '5073bf5c-1947-460d-8dd0-de9b883343d9');
-  const [msTenantId, setMsTenantId] = useState(localStorage.getItem('ms_tenant_id') || 'cb445030-e602-4993-a605-7e41f70338e8');
-  const [msAccount, setMsAccount] = useState(null);
-  const [msAccessToken, setMsAccessToken] = useState('');
-  const [isMsSyncing, setIsMsSyncing] = useState(false);
-
-  // Public ICS Settings States
-  const [publicIcsUrl, setPublicIcsUrl] = useState(localStorage.getItem('public_ics_url') || 'https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc37015325255969967654/calendar.ics');
+  // Google Calendar API States
+  const [googleClientId, setGoogleClientId] = useState(localStorage.getItem('google_client_id') || '560877969894-sptd7494hbf1c8mfg3g78qj6d8cr6nfa.apps.googleusercontent.com'); // Default default project ID or blank
+  const [googleAccessToken, setGoogleAccessToken] = useState(localStorage.getItem('google_access_token') || '');
+  const [googleAccount, setGoogleAccount] = useState(localStorage.getItem('google_user_email') || null);
+  const [isGoogleSyncing, setIsGoogleSyncing] = useState(false);
 
   // Manual Event Form States
   const [showManualForm, setShowManualForm] = useState(false);
@@ -190,16 +58,11 @@ export default function App() {
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
 
-  // Set default MS and LINE configuration on first mount if not already set
+  // Set default configurations on first mount
   useEffect(() => {
-    if (!localStorage.getItem('ms_client_id')) {
-      localStorage.setItem('ms_client_id', '5073bf5c-1947-460d-8dd0-de9b883343d9');
-      setMsClientId('5073bf5c-1947-460d-8dd0-de9b883343d9');
-    }
-    const curTenant = localStorage.getItem('ms_tenant_id');
-    if (!curTenant || curTenant === 'common' || curTenant === 'c8445030-e602-4993-a805-7e41f70338e8' || curTenant === '') {
-      localStorage.setItem('ms_tenant_id', 'cb445030-e602-4993-a605-7e41f70338e8');
-      setMsTenantId('cb445030-e602-4993-a605-7e41f70338e8');
+    if (!localStorage.getItem('google_client_id')) {
+      localStorage.setItem('google_client_id', '560877969894-sptd7494hbf1c8mfg3g78qj6d8cr6nfa.apps.googleusercontent.com');
+      setGoogleClientId('560877969894-sptd7494hbf1c8mfg3g78qj6d8cr6nfa.apps.googleusercontent.com');
     }
     if (!localStorage.getItem('line_access_token')) {
       localStorage.setItem('line_access_token', 'VE6pRAQO6w7nKGvGPrpUmSuFZZb5n8+FciujImJMAIEqPbjHGMBF4aI6sOY+A3XME0trehIxYBNswHObwUFjIVK0MV0E7b6BL9NaqkdzR0JHnrYAjgpD7GZ147O4CujXQ9270Onm/aL05XKFapXl1AdB04t89/1O/w1cDnyilFU=');
@@ -209,180 +72,127 @@ export default function App() {
       localStorage.setItem('line_user_id', 'gung1125');
       setLineUserId('gung1125');
     }
-    const curIcs = localStorage.getItem('public_ics_url');
-    if (!curIcs || curIcs === 'https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc3701532525596967654/calendar.ics') {
-      localStorage.setItem('public_ics_url', 'https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc37015325255969967654/calendar.ics');
-      setPublicIcsUrl('https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc37015325255969967654/calendar.ics');
-    }
   }, []);
 
-  // Check active Microsoft session on startup
+  // Parse Google OAuth hash parameters from URL Redirect
   useEffect(() => {
-    const checkActiveSession = async () => {
-      if (!msClientId) return;
-      try {
-        const pca = await initializeMsal(msClientId, msTenantId);
-        const accounts = pca.getAllAccounts();
-        if (accounts.length > 0) {
-          pca.setActiveAccount(accounts[0]);
-          const response = await pca.acquireTokenSilent({
-            scopes: ["User.Read", "Calendars.ReadWrite"]
-          });
-          setMsAccount(accounts[0]);
-          setMsAccessToken(response.accessToken);
-        }
-      } catch (err) {
-        console.warn("Silent token acquisition failed, session expired:", err);
+    const hash = window.location.hash;
+    if (hash) {
+      const params = new URLSearchParams(hash.substring(1));
+      const token = params.get('access_token');
+      if (token) {
+        setGoogleAccessToken(token);
+        localStorage.setItem('google_access_token', token);
+        
+        // Clean URL hash from bar
+        window.history.replaceState({}, document.title, window.location.pathname);
+        
+        fetchUserProfile(token);
+        fetchGoogleEvents(token);
       }
-    };
-    checkActiveSession();
-  }, [msClientId, msTenantId]);
+    } else if (googleAccessToken) {
+      fetchGoogleEvents(googleAccessToken);
+      fetchUserProfile(googleAccessToken);
+    }
+  }, [googleAccessToken]);
 
-  // Fetch Microsoft Calendar Events via MSAL OAuth
-  const fetchMicrosoftEvents = async () => {
-    if (!msAccessToken) return;
+  // Fetch Google User Profile
+  const fetchUserProfile = async (token) => {
     try {
-      const response = await fetch('https://graph.microsoft.com/v1.0/me/calendar/events?$top=100&$select=subject,start,end,location,bodyPreview', {
-        headers: {
-          'Authorization': `Bearer ${msAccessToken}`,
-          'Prefer': 'outlook.timezone="SE Asia Standard Time"'
-        }
+      const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.json();
-      if (data.value) {
-        const mapped = data.value.map(item => {
-          const startDateStr = item.start.dateTime.split('T')[0];
-          const startTimeStr = item.start.dateTime.split('T')[1].substring(0, 5);
-          const endTimeStr = item.end.dateTime.split('T')[1].substring(0, 5);
-          
-          return {
-            eventName: item.subject,
-            topic: item.bodyPreview || '',
-            date: startDateStr,
-            time: `${startTimeStr} - ${endTimeStr} น.`,
-            location: item.location?.displayName || '',
-            bookingType: 'work',
-            isMsEvent: true,
-            id: item.id
-          };
-        });
-        setMsEvents(mapped);
+      if (res.ok) {
+        const data = await res.json();
+        setGoogleAccount(data.email);
+        localStorage.setItem('google_user_email', data.email);
+      } else if (res.status === 401) {
+        handleGoogleLogout();
       }
     } catch (err) {
-      console.error("Error fetching MS events:", err);
+      console.error("Error fetching Google profile:", err);
     }
   };
 
-  // Fetch Microsoft Calendar Events via Public ICS Link (CORS bypassed via Proxy with fallback)
-  const fetchIcsEvents = async () => {
-    if (!publicIcsUrl) return;
-    setErrorMsg('');
-    setSuccessMsg('');
-    setIsMsSyncing(true);
-    
-    const proxies = [
-      `https://corsproxy.io/?`,
-      `https://api.allorigins.win/raw?url=`
-    ];
-    
-    let success = false;
-    let errorDetail = '';
-    
-    for (const proxy of proxies) {
-      try {
-        const fetchUrl = proxy.includes('allorigins') 
-          ? `${proxy}${encodeURIComponent(publicIcsUrl)}` 
-          : `${proxy}${publicIcsUrl}`;
-          
-        const response = await fetch(fetchUrl);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const text = await response.text();
-        
-        const parsed = parseICS(text);
-        if (parsed.length > 0) {
-          setIcsEvents(parsed);
-          setSuccessMsg(`ดึงข้อมูลปฏิทินสำเร็จ! พบกิจกรรมทั้งหมด ${parsed.length} รายการ`);
-          success = true;
-          break;
-        } else {
-          throw new Error("ดึงไฟล์ปฏิทินสำเร็จ แต่ไม่พบข้อมูลการนัดหมายที่ตรงกับรูปแบบ");
+  // Fetch Google Calendar Events
+  const fetchGoogleEvents = async (token) => {
+    if (!token) return;
+    setIsGoogleSyncing(true);
+    try {
+      const timeMin = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${encodeURIComponent(timeMin)}&singleEvents=true&orderBy=startTime&maxResults=150`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.items) {
+          const mapped = data.items.map(item => {
+            const startDateStr = item.start.date || item.start.dateTime.split('T')[0];
+            const startTimeStr = item.start.dateTime ? item.start.dateTime.split('T')[1].substring(0, 5) : '';
+            const endTimeStr = item.end.dateTime ? item.end.dateTime.split('T')[1].substring(0, 5) : '';
+            const timeDisplay = startTimeStr ? `${startTimeStr} - ${endTimeStr} น.` : 'ทั้งวัน';
+            
+            return {
+              eventName: item.summary || 'ไม่มีชื่องาน',
+              topic: item.description || '',
+              date: startDateStr,
+              time: timeDisplay,
+              location: item.location || '',
+              bookingType: 'work',
+              isGoogleEvent: true,
+              id: item.id
+            };
+          });
+          setGoogleEvents(mapped);
         }
-      } catch (err) {
-        console.warn(`Proxy ${proxy} failed:`, err);
-        errorDetail = err.message || String(err);
+      } else if (res.status === 401) {
+        handleGoogleLogout();
       }
+    } catch (err) {
+      console.error("Error fetching Google events:", err);
+    } finally {
+      setIsGoogleSyncing(false);
     }
-    
-    if (!success) {
-      setErrorMsg(`ดึงข้อมูลปฏิทินล้มเหลว: ${errorDetail}`);
-    }
-    setIsMsSyncing(false);
   };
 
-  // Sync MS Calendar events whenever msAccessToken is set/updated
-  useEffect(() => {
-    if (msAccessToken) {
-      fetchMicrosoftEvents();
-    } else {
-      setMsEvents([]);
-    }
-  }, [msAccessToken]);
-
-  // Sync public ICS events on load/update
-  useEffect(() => {
-    fetchIcsEvents();
-  }, [publicIcsUrl]);
-
-  // Microsoft Login / Logout handlers
-  const handleMicrosoftLogin = async () => {
-    if (!msClientId) {
-      setErrorMsg('กรุณากรอก Microsoft Client ID ในเมนูตั้งค่าก่อนเข้าสู่ระบบ');
+  // Google Sign-In
+  const handleGoogleLogin = () => {
+    if (!googleClientId) {
+      setErrorMsg('กรุณากรอก Google Client ID ในเมนูตั้งค่าก่อน');
       setShowSettings(true);
       return;
     }
-    
     setErrorMsg('');
     setSuccessMsg('');
     
-    try {
-      const pca = await initializeMsal(msClientId, msTenantId);
-      const loginRequest = {
-        scopes: ["User.Read", "Calendars.ReadWrite"],
-        prompt: "select_account"
-      };
-      
-      const response = await pca.loginPopup(loginRequest);
-      if (response && response.account) {
-        setMsAccount(response.account);
-        setMsAccessToken(response.accessToken);
-        setSuccessMsg(`เชื่อมต่อ Microsoft Account สำเร็จ: ${response.account.username}`);
-      }
-    } catch (err) {
-      console.error("Microsoft Login Error:", err);
-      setErrorMsg(`เข้าสู่ระบบ Microsoft ล้มเหลว: ${err.message || err}`);
-    }
+    localStorage.setItem('google_client_id', googleClientId);
+    
+    const redirectUri = window.location.origin + window.location.pathname;
+    const scope = encodeURIComponent('https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/userinfo.email');
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${scope}&prompt=consent`;
+    
+    window.location.href = authUrl;
   };
 
-  const handleMicrosoftLogout = () => {
-    setMsAccount(null);
-    setMsAccessToken('');
-    setMsEvents([]);
-    setSuccessMsg('ออกจากระบบ Microsoft เรียบร้อยแล้ว');
+  // Google Log Out
+  const handleGoogleLogout = () => {
+    setGoogleAccessToken('');
+    setGoogleAccount(null);
+    setGoogleEvents([]);
+    localStorage.removeItem('google_access_token');
+    localStorage.removeItem('google_user_email');
+    setSuccessMsg('ออกจากระบบ Google Calendar เรียบร้อยแล้ว');
   };
 
-  // Direct Calendar Booking via Graph API
-  const bookDirectOutlook = async (event) => {
-    if (!msAccount || !msAccessToken) {
-      setErrorMsg('กรุณาเข้าสู่ระบบ Microsoft ก่อนดำเนินการซิงค์ตรง');
+  // Direct Booking to Google Calendar
+  const bookDirectGoogle = async (event) => {
+    if (!googleAccessToken) {
+      setErrorMsg('กรุณาเชื่อมต่อ Google Calendar ก่อนดำเนินการบันทึก');
       return;
     }
     
-    setIsMsSyncing(true);
+    setIsGoogleSyncing(true);
     setErrorMsg('');
     setSuccessMsg('');
     
@@ -390,39 +200,34 @@ export default function App() {
       const { start, end } = parseEventDateTime(event.date, event.time);
       const subject = event.eventName || event.courseName || 'นัดหมาย My Booking Calendar';
       
-      const bodyContent = `ชื่องาน: ${event.eventName || '-'}<br/>
-คอร์ส: ${event.courseName || '-'}<br/>
-หัวข้อ: ${event.topic || '-'}<br/>
-เวลา: ${event.time || '-'}<br/>
-สถานที่: ${event.location || '-'}<br/>
-ประเภทนัดหมาย: ${event.bookingType === 'personal' ? 'Booking ส่วนตัว' : 'Booking ที่ทำงาน'}<br/>
-ลิงก์ลงทะเบียน: <a href="${event.registerLink}">${event.registerLink}</a><br/>
-ลิงก์เข้าอบรม: <a href="${event.joinLink}">${event.joinLink}</a><br/><br/>
-<i>บันทึกจาก My Booking Calendar</i>`;
+      const bodyContent = `ชื่องาน: ${event.eventName || '-'}\n` +
+                          `คอร์ส: ${event.courseName || '-'}\n` +
+                          `หัวข้อ: ${event.topic || '-'}\n` +
+                          `เวลา: ${event.time || '-'}\n` +
+                          `สถานที่: ${event.location || '-'}\n` +
+                          `ประเภทนัดหมาย: ${event.bookingType === 'personal' ? 'Booking ส่วนตัว' : 'Booking ที่ทำงาน'}\n` +
+                          `ลิงก์ลงทะเบียน: ${event.registerLink || '-'}\n` +
+                          `ลิงก์เข้าอบรม: ${event.joinLink || '-'}\n\n` +
+                          `บันทึกจาก My Booking Calendar`;
 
       const requestBody = {
-        subject: subject,
-        body: {
-          contentType: "HTML",
-          content: bodyContent
-        },
+        summary: subject,
+        description: bodyContent,
         start: {
           dateTime: start,
-          timeZone: "SE Asia Standard Time"
+          timeZone: "Asia/Bangkok"
         },
         end: {
           dateTime: end,
-          timeZone: "SE Asia Standard Time"
+          timeZone: "Asia/Bangkok"
         },
-        location: {
-          displayName: event.location || 'ไม่ได้ระบุสถานที่'
-        }
+        location: event.location || 'ไม่ได้ระบุสถานที่'
       };
       
-      const response = await fetch('https://graph.microsoft.com/v1.0/me/calendar/events', {
+      const response = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${msAccessToken}`,
+          'Authorization': `Bearer ${googleAccessToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(requestBody)
@@ -433,14 +238,13 @@ export default function App() {
         throw new Error(errData.error?.message || `HTTP ${response.status}`);
       }
       
-      setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงในปฏิทิน Microsoft ของคุณเรียบร้อยแล้ว!`);
-      fetchMicrosoftEvents();
-      fetchIcsEvents();
+      setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงใน Google Calendar เรียบร้อยแล้ว!`);
+      fetchGoogleEvents(googleAccessToken);
     } catch (err) {
-      console.error("Microsoft Graph API Error:", err);
+      console.error("Google Calendar API Error:", err);
       setErrorMsg(`บันทึกปฏิทินล้มเหลว: ${err.message || err}`);
     } finally {
-      setIsMsSyncing(false);
+      setIsGoogleSyncing(false);
     }
   };
 
@@ -511,7 +315,7 @@ export default function App() {
           if (parsedData.events && parsedData.events.length > 0) {
             const eventsWithImage = parsedData.events.map(e => ({ 
               ...e, 
-              bookingType: 'work', // default to work
+              bookingType: 'work',
               sourceImage: base64Image 
             }));
             setEvents(prev => [...prev, ...eventsWithImage]);
@@ -650,22 +454,11 @@ export default function App() {
     days.push(i);
   }
 
-  // รวมกิจกรรมทั้ง Local, Microsoft Calendar (OAuth), และ Public ICS Feed
+  // รวมกิจกรรมทั้ง Local และ Google Calendar
   const getEventsForDate = (dateStr) => {
     const local = events.filter(e => e.date === dateStr);
-    const ms = msEvents.filter(e => e.date === dateStr);
-    const ics = icsEvents.filter(e => e.date === dateStr);
-
-    const merged = [...local, ...ms];
-    // เลี่ยงแสดงกิจกรรมซ้ำกัน (เทียบชื่องานและวันที่)
-    ics.forEach(ie => {
-      const exists = merged.some(me => me.eventName === ie.eventName && me.date === ie.date);
-      if (!exists) {
-        merged.push(ie);
-      }
-    });
-    
-    return merged;
+    const google = googleEvents.filter(e => e.date === dateStr);
+    return [...local, ...google];
   };
 
   const formatDateString = (year, month, day) => {
@@ -674,64 +467,70 @@ export default function App() {
 
   const selectedDateEvents = selectedDate ? getEventsForDate(selectedDate) : [];
 
-  // Parse event date and time into start/end format for Outlook/ICS
+  // Parse event date and time into start/end format
   const parseEventDateTime = (dateStr, timeStr) => {
     if (!dateStr) return { start: '', end: '' };
     
-    let startHour = "09";
-    let startMin = "00";
-    let endHour = "17";
-    let endMin = "00";
+    let startHour = 9;
+    let startMin = 0;
+    let endHour = 10;
+    let endMin = 0;
     
     if (timeStr) {
       const times = timeStr.match(/(\d{1,2})[:.](\d{2})/g);
       if (times && times.length >= 1) {
         const startParts = times[0].split(/[:.]/);
-        startHour = startParts[0].padStart(2, '0');
-        startMin = startParts[1].padStart(2, '0');
+        startHour = parseInt(startParts[0]);
+        startMin = parseInt(startParts[1]);
         
         if (times.length >= 2) {
           const endParts = times[1].split(/[:.]/);
-          endHour = endParts[0].padStart(2, '0');
-          endMin = endParts[1].padStart(2, '0');
+          endHour = parseInt(endParts[0]);
+          endMin = parseInt(endParts[1]);
         } else {
-          const hourNum = parseInt(startHour);
-          endHour = String(hourNum >= 23 ? 23 : hourNum + 1).padStart(2, '0');
+          endHour = startHour + 1;
           endMin = startMin;
         }
       }
     }
     
+    const startIso = `${dateStr}T${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}:00+07:00`;
+    const endIso = `${dateStr}T${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}:00+07:00`;
+    
     return {
-      start: `${dateStr}T${startHour}:${startMin}:00`,
-      end: `${dateStr}T${endHour}:${endMin}:00`
+      start: startIso,
+      end: endIso
     };
   };
 
-  const getOutlookCalendarLink = (event, platform) => {
+  // Google Calendar Manual Redirect Template Link
+  const getGoogleCalendarLink = (event) => {
     const { start, end } = parseEventDateTime(event.date, event.time);
     
-    const baseUrl = platform === 'office365' 
-      ? 'https://outlook.office.com/calendar/deeplink/compose' 
-      : 'https://outlook.live.com/calendar/deeplink/compose';
-      
+    const toUtcStr = (isoStr) => {
+      const d = new Date(isoStr);
+      if (isNaN(d)) return '';
+      return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    };
+    
+    const dates = `${toUtcStr(start)}/${toUtcStr(end)}`;
+    
     const subject = encodeURIComponent(event.eventName || event.courseName || 'นัดหมาย My Booking Calendar');
-    const bodyText = `ชื่องาน: ${event.eventName || '-'}\nคอร์ส: ${event.courseName || '-'}\nหัวข้อ: ${event.topic || '-'}\nเวลา: ${event.time || '-'}\nสถานที่: ${event.location || '-'}\nประเภทนัดหมาย: ${event.bookingType === 'personal' ? 'ส่วนตัว' : 'ที่ทำงาน'}\nลิงก์เข้าอบรม: ${event.joinLink || '-'}\nลิงก์ลงทะเบียน: ${event.registerLink || '-'}\n\nบันทึกจาก My Booking Calendar`;
-    const body = encodeURIComponent(bodyText);
+    const details = encodeURIComponent(`ชื่องาน: ${event.eventName || '-'}\nคอร์ส: ${event.courseName || '-'}\nหัวข้อ: ${event.topic || '-'}\nเวลา: ${event.time || '-'}\nสถานที่: ${event.location || '-'}\nประเภทนัดหมาย: ${event.bookingType === 'personal' ? 'ส่วนตัว' : 'ที่ทำงาน'}\nลิงก์เข้าอบรม: ${event.joinLink || '-'}\nลิงก์ลงทะเบียน: ${event.registerLink || '-'}\n\nบันทึกจาก My Booking Calendar`);
     const location = encodeURIComponent(event.location || '');
     
-    return `${baseUrl}?path=/calendar/action/compose&rru=addevent&subject=${subject}&startdt=${start}&enddt=${end}&body=${body}&location=${location}`;
+    return `https://www.google.com/calendar/render?action=TEMPLATE&text=${subject}&dates=${dates}&details=${details}&location=${location}`;
   };
 
   const formatToICSDateTime = (dateTimeStr) => {
-    return dateTimeStr.replace(/[-:]/g, '');
+    return dateTimeStr.replace(/[-:]/g, '').split('+')[0];
   };
 
   const downloadICSFile = (event) => {
     const { start, end } = parseEventDateTime(event.date, event.time);
     const icsStart = formatToICSDateTime(start);
     const icsEnd = formatToICSDateTime(end);
-    const timestamp = formatToICSDateTime(new Date().toISOString().split('.')[0].replace('Z', ''));
+    const timestamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0];
     
     const subject = event.eventName || event.courseName || 'นัดหมาย My Booking Calendar';
     const description = `ชื่องาน: ${event.eventName || '-'}\\nคอร์ส: ${event.courseName || '-'}\\nหัวข้อ: ${event.topic || '-'}\\nเวลา: ${event.time || '-'}\\nสถานที่: ${event.location || '-'}\\nประเภทนัดหมาย: ${event.bookingType === 'personal' ? 'ส่วนตัว' : 'ที่ทำงาน'}\\nลิงก์เข้าอบรม: ${event.joinLink || '-'}\\nลิงก์ลงทะเบียน: ${event.registerLink || '-'}`;
@@ -769,26 +568,25 @@ export default function App() {
       {/* Header */}
       <header className="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-blue-600">
-            <Calendar className="w-7 h-7 text-blue-600" />
-            <h1 className="text-xl font-bold tracking-tight text-slate-800">My <span className="text-blue-600">Booking Calendar</span></h1>
+          <div className="flex items-center gap-2 text-emerald-600">
+            <Calendar className="w-7 h-7 text-emerald-600" />
+            <h1 className="text-xl font-bold tracking-tight text-slate-800">My <span className="text-emerald-600">Booking Calendar</span></h1>
           </div>
           <div className="flex items-center gap-4">
-            {msAccount ? (
-              <div className="flex items-center gap-2 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-100 text-xs font-semibold">
-                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
-                <span className="hidden md:inline">{msAccount.username}</span>
-                <span className="md:hidden">MS Account</span>
-                <button onClick={handleMicrosoftLogout} className="text-slate-400 hover:text-red-500 font-bold ml-1" title="ออกจากระบบ Microsoft">
+            {googleAccount ? (
+              <div className="flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg border border-emerald-100 text-xs font-semibold">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                <span>{googleAccount}</span>
+                <button onClick={handleGoogleLogout} className="text-slate-400 hover:text-red-500 font-bold ml-1" title="ออกจากระบบ Google">
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             ) : (
               <button 
-                onClick={handleMicrosoftLogin}
-                className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+                onClick={handleGoogleLogin}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
               >
-                <Sun className="w-3.5 h-3.5" /> เชื่อมต่อ MS Calendar
+                <Sun className="w-3.5 h-3.5" /> เชื่อมต่อ Google Calendar
               </button>
             )}
 
@@ -813,7 +611,7 @@ export default function App() {
           
           {/* Notifications Status Bubble */}
           {notifyStatus && (
-            <div className="bg-blue-600 text-white p-3 rounded-xl shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
+            <div className="bg-emerald-600 text-white p-3 rounded-xl shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-4">
               <Bell className="w-5 h-5" />
               <span className="text-sm font-medium">{notifyStatus}</span>
             </div>
@@ -840,7 +638,7 @@ export default function App() {
                         localStorage.setItem('line_access_token', e.target.value);
                       }}
                       placeholder="วาง Channel Access Token ของคุณ..."
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-400"
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-400"
                     />
                   </div>
                   <div>
@@ -853,7 +651,7 @@ export default function App() {
                         localStorage.setItem('line_user_id', e.target.value);
                       }}
                       placeholder="เช่น U12345..."
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-400"
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-400"
                     />
                   </div>
                 </div>
@@ -865,74 +663,35 @@ export default function App() {
                       min="1"
                       value={notifyDays}
                       onChange={(e) => setNotifyDays(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-400"
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-400"
                     />
                   </div>
                 </div>
-                <p className="text-xs text-slate-400 mt-2">*ส่งผ่านระบบ Proxy เพื่อเลี่ยงข้อจำกัด CORS ฝั่งเบราว์เซอร์ และแจ้งเตือนตรงถึง User ID ของคุณ</p>
               </div>
 
-              {/* Public Calendar URL Setup */}
               <div className="border-t border-slate-700 pt-4">
                 <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                  <LinkIcon className="w-5 h-5 text-sky-400" /> เชื่อมต่อผ่าน ลิงก์ปฏิทินสาธารณะ (.ics)
+                  <Calendar className="w-5 h-5 text-emerald-400" /> ตั้งค่าเชื่อมต่อ Google Calendar
                 </h2>
                 <div className="space-y-3">
                   <div>
-                    <label className="block text-sm text-slate-300 mb-1">ลิงก์ปฏิทิน ICS ที่เผยแพร่</label>
+                    <label className="block text-sm text-slate-300 mb-1">Google OAuth Client ID</label>
                     <input 
                       type="text" 
-                      value={publicIcsUrl}
+                      value={googleClientId}
                       onChange={(e) => {
-                        setPublicIcsUrl(e.target.value);
-                        localStorage.setItem('public_ics_url', e.target.value);
+                        setGoogleClientId(e.target.value);
+                        localStorage.setItem('google_client_id', e.target.value);
                       }}
-                      placeholder="วางลิงก์ ICS เช่น https://outlook.office365.com/.../calendar.ics"
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-400"
+                      placeholder="วาง Google Client ID จาก Google Cloud Console..."
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-emerald-400"
                     />
                   </div>
                   <p className="text-xs text-slate-400">
-                    *เมื่อระบุลิงก์ ICS นี้ ระบบจะคอยดึงนัดหมายทั้งหมดจาก Microsoft Calendar ของคุณมาแสดงโดยอัตโนมัติ (ไม่ต้องกดล็อกอินทุกครั้งและเลี่ยงข้อจำกัดล็อกอินด้วยองค์กร)
+                    *สิทธิ์ (Scopes): แอปพลิเคชันใช้สิทธิ์ `calendar.events` (เขียนนัดหมาย) และ `calendar.readonly` (อ่านนัดหมาย)<br/>
+                    *Redirect URI ใน Google Console: <code className="bg-slate-900 px-1 py-0.5 rounded text-emerald-300">{window.location.origin + window.location.pathname}</code>
                   </p>
                 </div>
-              </div>
-
-              <div className="border-t border-slate-700 pt-4">
-                <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                  <Calendar className="w-5 h-5 text-blue-400" /> ตั้งค่าเชื่อมต่อ Microsoft Calendar (ผ่าน API App Registration)
-                </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
-                  <div>
-                    <label className="block text-sm text-slate-300 mb-1">Application (client) ID</label>
-                    <input 
-                      type="text" 
-                      value={msClientId}
-                      onChange={(e) => {
-                        setMsClientId(e.target.value);
-                        localStorage.setItem('ms_client_id', e.target.value);
-                      }}
-                      placeholder="คัดลอก Client ID จาก Azure Portal..."
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-300 mb-1">Directory (tenant) ID</label>
-                    <input 
-                      type="text" 
-                      value={msTenantId}
-                      onChange={(e) => {
-                        setMsTenantId(e.target.value);
-                        localStorage.setItem('ms_tenant_id', e.target.value);
-                      }}
-                      placeholder="ระบบระบุค่าเริ่มต้นขององค์กรคุณไว้แล้ว..."
-                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-400"
-                    />
-                  </div>
-                </div>
-                <p className="text-xs text-slate-400">
-                  *สิทธิ์ (Permissions): แอปพลิเคชันต้องการสิทธิ์แบบ Delegated `Calendars.ReadWrite` และ `User.Read`<br/>
-                  *ตั้งค่า Redirect URIs ใน Azure Portal: <code className="bg-slate-900 px-1 py-0.5 rounded text-blue-300">{window.location.origin + window.location.pathname}</code>
-                </p>
               </div>
             </section>
           )}
@@ -941,12 +700,12 @@ export default function App() {
           <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Upload className="w-5 h-5 text-blue-500" /> จัดการตารางนัดหมาย / โปสเตอร์
+                <Upload className="w-5 h-5 text-emerald-500" /> จัดการตารางนัดหมาย / โปสเตอร์
               </h2>
               <div className="flex items-center gap-3">
                 <button 
                   onClick={() => setShowManualForm(!showManualForm)}
-                  className="text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200 transition-colors font-semibold flex items-center gap-1.5"
+                  className="text-sm bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-lg border border-emerald-200 transition-colors font-semibold flex items-center gap-1.5"
                 >
                   <Plus className="w-4 h-4" /> กรอกข้อมูลเอง
                 </button>
@@ -974,7 +733,7 @@ export default function App() {
                       value={manualEvent.eventName}
                       onChange={(e) => setManualEvent(prev => ({ ...prev, eventName: e.target.value }))}
                       placeholder="เช่น ประชุมแผนงานประจำไตรมาส"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                   
@@ -985,7 +744,7 @@ export default function App() {
                       value={manualEvent.courseName}
                       onChange={(e) => setManualEvent(prev => ({ ...prev, courseName: e.target.value }))}
                       placeholder="เช่น C&I PV Course (ถ้ามี)"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -996,7 +755,7 @@ export default function App() {
                       value={manualEvent.topic}
                       onChange={(e) => setManualEvent(prev => ({ ...prev, topic: e.target.value }))}
                       placeholder="เช่น อัปเดตงานออกแบบโซล่าร์รูฟท็อป"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -1007,7 +766,7 @@ export default function App() {
                       required
                       value={manualEvent.date}
                       onChange={(e) => setManualEvent(prev => ({ ...prev, date: e.target.value }))}
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
                     />
                     <span className="text-[11px] text-slate-500 mt-1 block">
                       {manualEvent.date ? `แสดงผลเป็น: ${formatDisplayDate(manualEvent.date)}` : 'ตัวอย่าง: 16 มิถุนายน 2026'}
@@ -1020,7 +779,7 @@ export default function App() {
                       type="time" 
                       value={manualEvent.startTime}
                       onChange={(e) => setManualEvent(prev => ({ ...prev, startTime: e.target.value }))}
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -1030,7 +789,7 @@ export default function App() {
                       type="time" 
                       value={manualEvent.endTime}
                       onChange={(e) => setManualEvent(prev => ({ ...prev, endTime: e.target.value }))}
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -1040,8 +799,8 @@ export default function App() {
                       type="text" 
                       value={manualEvent.location}
                       onChange={(e) => setManualEvent(prev => ({ ...prev, location: e.target.value }))}
-                      placeholder="เช่น ห้องประชุมใหญ่ หรือ Microsoft Teams"
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
+                      placeholder="เช่น ห้องประชุมใหญ่ หรือ Google Meet"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -1050,7 +809,7 @@ export default function App() {
                     <select
                       value={manualEvent.bookingType}
                       onChange={(e) => setManualEvent(prev => ({ ...prev, bookingType: e.target.value }))}
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
                     >
                       <option value="work">💼 Booking ที่ทำงาน (Work)</option>
                       <option value="personal">🏠 Booking ส่วนตัว (Personal)</option>
@@ -1064,18 +823,18 @@ export default function App() {
                       value={manualEvent.registerLink}
                       onChange={(e) => setManualEvent(prev => ({ ...prev, registerLink: e.target.value }))}
                       placeholder="วางลิงก์ลงทะเบียน..."
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 mb-1">ลิงก์เข้าจัดงาน (Zoom/Teams)</label>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">ลิงก์เข้าจัดงาน (Zoom/Meet)</label>
                     <input 
                       type="text" 
                       value={manualEvent.joinLink}
                       onChange={(e) => setManualEvent(prev => ({ ...prev, joinLink: e.target.value }))}
                       placeholder="วางลิงก์เข้าประชุม..."
-                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-blue-500"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
 
@@ -1094,7 +853,7 @@ export default function App() {
                           reader.readAsDataURL(file);
                         }
                       }}
-                      className="w-full text-xs text-slate-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                      className="w-full text-xs text-slate-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100"
                     />
                   </div>
                 </div>
@@ -1149,7 +908,7 @@ export default function App() {
                       setManualEvent({ eventName: '', courseName: '', topic: '', date: '', startTime: '', endTime: '', location: '', registerLink: '', joinLink: '', bookingType: 'work' });
                       setManualImageFile(null);
                     }}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm"
                   >
                     เพิ่มรายการนัดหมาย
                   </button>
@@ -1162,12 +921,12 @@ export default function App() {
                 <img src={uploadedImage} alt="Uploaded Poster" className="max-h-full object-contain rounded-lg shadow-sm" />
               </div>
             ) : (
-              <label className={`flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${isAnalyzing ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-300 hover:bg-slate-100'}`}>
+              <label className={`flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-xl cursor-pointer transition-colors ${isAnalyzing ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-300 hover:bg-slate-100'}`}>
                 <div className="flex flex-col items-center justify-center pt-5 pb-6">
                   {isAnalyzing ? (
                     <>
-                      <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-3" />
-                      <p className="text-sm text-blue-600 font-medium">AI กำลังวิเคราะห์ข้อมูลจากภาพตาราง...</p>
+                      <Loader2 className="w-10 h-10 text-emerald-500 animate-spin mb-3" />
+                      <p className="text-sm text-emerald-600 font-medium">AI กำลังวิเคราะห์ข้อมูลจากภาพตาราง...</p>
                     </>
                   ) : (
                     <>
@@ -1190,7 +949,7 @@ export default function App() {
           <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
              <div className="flex items-center justify-between mb-6">
               <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-blue-500" /> ปฏิทินนัดหมาย
+                <Calendar className="w-5 h-5 text-emerald-500" /> ปฏิทินนัดหมาย
               </h2>
               <div className="flex items-center gap-4">
                 <button onClick={prevMonth} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronLeft className="w-5 h-5" /></button>
@@ -1217,9 +976,9 @@ export default function App() {
                 const isSelected = selectedDate === dateStr;
                 const isToday = formatDateString(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()) === dateStr;
 
-                const hasWork = dayEvents.some(e => e.bookingType !== 'personal' && !e.isMsEvent);
-                const hasPersonal = dayEvents.some(e => e.bookingType === 'personal' && !e.isMsEvent);
-                const hasMsCalendarEvent = dayEvents.some(e => e.isMsEvent);
+                const hasWork = dayEvents.some(e => e.bookingType !== 'personal' && !e.isGoogleEvent);
+                const hasPersonal = dayEvents.some(e => e.bookingType === 'personal' && !e.isGoogleEvent);
+                const hasGoogleEvent = dayEvents.some(e => e.isGoogleEvent);
 
                 let dayBgClass = '';
                 if (isSelected) {
@@ -1233,8 +992,8 @@ export default function App() {
                   itemBg = 'bg-blue-50 hover:bg-blue-100 border border-blue-100 text-blue-900';
                 } else if (hasPersonal) {
                   itemBg = 'bg-orange-50 hover:bg-orange-100 border border-orange-100 text-orange-900';
-                } else if (hasMsCalendarEvent) {
-                  itemBg = 'bg-sky-50 hover:bg-sky-100 border border-sky-100 text-sky-900';
+                } else if (hasGoogleEvent) {
+                  itemBg = 'bg-emerald-50 hover:bg-emerald-100 border border-emerald-100 text-emerald-900';
                 } else if (isToday) {
                   itemBg = 'bg-slate-100 font-bold text-slate-900';
                 } else {
@@ -1258,8 +1017,8 @@ export default function App() {
                       {hasPersonal && (
                         <span className="block w-1.5 h-1.5 rounded-full bg-orange-500"></span>
                       )}
-                      {hasMsCalendarEvent && (
-                        <span className="block w-1.5 h-1.5 rounded-full bg-sky-500"></span>
+                      {hasGoogleEvent && (
+                        <span className="block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                       )}
                     </div>
                   </button>
@@ -1278,8 +1037,8 @@ export default function App() {
                 <span>🏠 ส่วนตัว (Personal)</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="w-3 h-3 bg-sky-50 border border-sky-200 rounded-md block"></span>
-                <span>🌐 Microsoft Calendar</span>
+                <span className="w-3 h-3 bg-emerald-50 border border-emerald-200 rounded-md block"></span>
+                <span>🟢 Google Calendar</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 bg-purple-50 border border-purple-200 rounded-md block"></span>
@@ -1295,20 +1054,17 @@ export default function App() {
           <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 h-full min-h-[500px]">
             <div className="flex items-center justify-between mb-6 border-b border-slate-100 pb-4">
               <h2 className="text-lg font-semibold flex items-center gap-2">
-                 <FileText className="w-5 h-5 text-blue-500" /> 
+                 <FileText className="w-5 h-5 text-emerald-500" /> 
                  รายละเอียดนัดหมาย
               </h2>
-              {(msAccount || publicIcsUrl) && (
+              {googleAccessToken && (
                 <button 
-                  onClick={() => {
-                    if (msAccessToken) fetchMicrosoftEvents();
-                    if (publicIcsUrl) fetchIcsEvents();
-                  }}
-                  disabled={isMsSyncing}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded border border-blue-100 disabled:opacity-50"
+                  onClick={() => fetchGoogleEvents(googleAccessToken)}
+                  disabled={isGoogleSyncing}
+                  className="text-xs text-emerald-600 hover:text-emerald-800 font-bold flex items-center gap-1 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 disabled:opacity-50"
                   title="รีเฟรชข้อมูลปฏิทินทั้งหมด"
                 >
-                  {isMsSyncing ? (
+                  {isGoogleSyncing ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" /> กำลังดึงข้อมูล...
                     </>
@@ -1341,17 +1097,17 @@ export default function App() {
                   const isEditing = editingEvent === event;
                   
                   return (
-                    <div key={idx} className={`p-5 rounded-xl border relative overflow-hidden transition-all duration-200 ${event.isMsEvent ? 'bg-sky-50/50 border-sky-100 text-sky-950' : isPersonal ? 'bg-orange-50/50 border-orange-100 text-orange-950' : 'bg-blue-50/50 border-blue-100 text-blue-950'}`}>
+                    <div key={idx} className={`p-5 rounded-xl border relative overflow-hidden transition-all duration-200 ${event.isGoogleEvent ? 'bg-emerald-50/50 border-emerald-100 text-emerald-950' : isPersonal ? 'bg-orange-50/50 border-orange-100 text-orange-950' : 'bg-blue-50/50 border-blue-100 text-blue-950'}`}>
                       {/* Decorative bar */}
-                      <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${event.isMsEvent ? 'bg-sky-500' : isPersonal ? 'bg-orange-500' : 'bg-blue-500'}`}></div>
+                      <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${event.isGoogleEvent ? 'bg-emerald-500' : isPersonal ? 'bg-orange-500' : 'bg-blue-500'}`}></div>
                       
                       {/* Booking Type Tag and Toggler */}
                       <div className="flex justify-between items-center mb-3 flex-wrap gap-2">
-                        <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold tracking-wide ${event.isMsEvent ? 'bg-sky-100 text-sky-800 border border-sky-200' : isPersonal ? 'bg-orange-100 text-orange-800 border border-orange-200' : 'bg-blue-100 text-blue-800 border border-blue-200'}`}>
-                          {event.isMsEvent ? '🌐 Microsoft Calendar' : isPersonal ? '🏠 Booking ส่วนตัว' : '💼 Booking ที่ทำงาน'}
+                        <span className={`text-xs px-2.5 py-0.5 rounded-full font-bold tracking-wide ${event.isGoogleEvent ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : isPersonal ? 'bg-orange-100 text-orange-800 border border-orange-200' : 'bg-blue-100 text-blue-800 border border-blue-200'}`}>
+                          {event.isGoogleEvent ? '🟢 Google Calendar' : isPersonal ? '🏠 Booking ส่วนตัว' : '💼 Booking ที่ทำงาน'}
                         </span>
                         
-                        {!event.isMsEvent && (
+                        {!event.isGoogleEvent && (
                           <div className="flex gap-2 text-xs">
                             <button 
                               onClick={() => {
@@ -1454,7 +1210,7 @@ export default function App() {
                           <h3 className="text-xl font-bold text-slate-800 mb-1">{event.eventName || 'ไม่ได้ระบุชื่องาน'}</h3>
                           
                           {event.courseName && (
-                            <p className={`font-medium mb-4 flex items-center gap-2 text-sm ${event.isMsEvent ? 'text-sky-700' : isPersonal ? 'text-orange-700' : 'text-blue-700'}`}>
+                            <p className={`font-medium mb-4 flex items-center gap-2 text-sm ${event.isGoogleEvent ? 'text-emerald-700' : isPersonal ? 'text-orange-700' : 'text-blue-700'}`}>
                               <BookOpen className="w-4 h-4" /> {event.courseName}
                             </p>
                           )}
@@ -1489,17 +1245,17 @@ export default function App() {
                             </div>
 
                             {/* Options specific to local events */}
-                            {!event.isMsEvent && (
+                            {!event.isGoogleEvent && (
                               <div className="pt-4 mt-2 border-t border-slate-200 space-y-2">
                                 {event.registerLink && (
                                   <a href={event.registerLink.startsWith('http') ? event.registerLink : `https://${event.registerLink}`} target="_blank" rel="noreferrer" 
-                                     className="flex items-center justify-center gap-2 w-full py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 hover:text-blue-600 transition-colors font-medium">
+                                     className="flex items-center justify-center gap-2 w-full py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 hover:text-emerald-600 transition-colors font-medium">
                                     <LinkIcon className="w-4 h-4" /> ลิ้งค์ลงทะเบียน
                                   </a>
                                 )}
                                 {event.joinLink && (
                                   <a href={event.joinLink.startsWith('http') ? event.joinLink : `https://${event.joinLink}`} target="_blank" rel="noreferrer"
-                                     className="flex items-center justify-center gap-2 w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm shadow-blue-200 transition-colors font-medium">
+                                     className="flex items-center justify-center gap-2 w-full py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 shadow-sm shadow-emerald-200 transition-colors font-medium">
                                     <Video className="w-4 h-4" /> ลิ้งค์เข้าประชุม / ห้องจัดงาน
                                   </a>
                                 )}
@@ -1507,48 +1263,44 @@ export default function App() {
                             )}
 
                             <div className="pt-4 mt-2 border-t border-slate-200 space-y-2">
-                              {!event.isMsEvent ? (
+                              {!event.isGoogleEvent ? (
                                 <>
-                                  <span className="text-slate-500 block text-xs mb-1 font-semibold">ซิงค์ไปยัง Microsoft Calendar</span>
-                                  {msAccount ? (
+                                  <span className="text-slate-500 block text-xs mb-1 font-semibold">ซิงค์ไปยัง Google Calendar</span>
+                                  {googleAccessToken ? (
                                     <button 
-                                      onClick={() => bookDirectOutlook(event)}
-                                      disabled={isMsSyncing}
-                                      className="flex items-center justify-center gap-2 w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors text-sm font-semibold shadow-sm"
+                                      onClick={() => bookDirectGoogle(event)}
+                                      disabled={isGoogleSyncing}
+                                      className="flex items-center justify-center gap-2 w-full py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:bg-emerald-300 transition-colors text-sm font-semibold shadow-sm"
                                     >
-                                      {isMsSyncing ? (
+                                      {isGoogleSyncing ? (
                                         <>
                                           <Loader2 className="w-4 h-4 animate-spin" /> กำลังบันทึกลงปฏิทิน...
                                         </>
                                       ) : (
                                         <>
-                                          <Check className="w-4 h-4" /> บันทึกลง MS Calendar ทันที
+                                          <Check className="w-4 h-4" /> บันทึกลง Google Calendar ทันที
                                         </>
                                       )}
                                     </button>
                                   ) : (
                                     <button 
-                                      onClick={handleMicrosoftLogin}
+                                      onClick={handleGoogleLogin}
                                       className="flex items-center justify-center gap-2 w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors text-sm font-semibold border border-slate-200"
                                     >
-                                      <Sun className="w-4 h-4 text-blue-500" /> ล็อกอิน Microsoft เพื่อบันทึกด่วน
+                                      <Sun className="w-4 h-4 text-emerald-500" /> ล็อกอิน Google เพื่อบันทึกด่วน
                                     </button>
                                   )}
                                 </>
                               ) : (
-                                <div className="p-3 bg-sky-100/50 rounded-lg border border-sky-200 text-sky-800 text-xs font-semibold flex items-center gap-1.5">
-                                  <Check className="w-4 h-4 text-sky-600" /> กิจกรรมนี้อยู่ใน Microsoft Calendar แล้ว
+                                <div className="p-3 bg-emerald-100/50 rounded-lg border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-1.5">
+                                  <Check className="w-4 h-4 text-emerald-600" /> กิจกรรมนี้อยู่ใน Google Calendar แล้ว
                                 </div>
                               )}
 
-                              <div className="grid grid-cols-2 gap-2 pt-1">
-                                <a href={getOutlookCalendarLink(event, 'live')} target="_blank" rel="noreferrer"
-                                   className="flex items-center justify-center gap-1.5 py-1.5 px-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-xs font-medium border border-blue-100">
-                                  <Calendar className="w-3.5 h-3.5 text-blue-500" /> Link Outlook (ส่วนตัว)
-                                </a>
-                                <a href={getOutlookCalendarLink(event, 'office365')} target="_blank" rel="noreferrer"
-                                   className="flex items-center justify-center gap-1.5 py-1.5 px-3 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors text-xs font-medium border border-indigo-100">
-                                  <Calendar className="w-3.5 h-3.5 text-indigo-500" /> Link Microsoft 365
+                              <div className="pt-1">
+                                <a href={getGoogleCalendarLink(event)} target="_blank" rel="noreferrer"
+                                   className="flex items-center justify-center gap-1.5 w-full py-1.5 px-3 bg-emerald-50 text-emerald-700 rounded-lg hover:bg-emerald-100 transition-colors text-xs font-medium border border-emerald-100">
+                                  <Calendar className="w-3.5 h-3.5 text-emerald-500" /> เปิดหน้าปฏิทินเพิ่มลง Google Calendar
                                 </a>
                               </div>
                               <button onClick={() => downloadICSFile(event)}
