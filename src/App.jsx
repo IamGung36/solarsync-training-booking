@@ -3,11 +3,14 @@ import { Calendar, Upload, MapPin, Clock, Link as LinkIcon, BookOpen, Loader2, C
 import { PublicClientApplication } from "@azure/msal-browser";
 
 // MSAL Initialization helper
-const initializeMsal = async (clientId, tenantId = 'common') => {
+const initializeMsal = async (clientId, tenantId = 'c8445030-e602-4993-a805-7e41f70338e8') => {
+  const finalClientId = clientId || '5073bf5c-1947-460d-8dd0-de9b883343d9';
+  const finalTenantId = (!tenantId || tenantId === 'common') ? 'c8445030-e602-4993-a805-7e41f70338e8' : tenantId;
+
   const msalConfig = {
     auth: {
-      clientId: clientId,
-      authority: `https://login.microsoftonline.com/${tenantId || 'common'}`,
+      clientId: finalClientId,
+      authority: `https://login.microsoftonline.com/${finalTenantId}`,
       redirectUri: window.location.origin + window.location.pathname,
     },
     cache: {
