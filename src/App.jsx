@@ -1,5 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Upload, MapPin, Clock, Link as LinkIcon, BookOpen, Loader2, ChevronLeft, ChevronRight, Sun, FileText, Video, Bell, Image as ImageIcon, Settings, Check, X } from 'lucide-react';
+import { Calendar, Upload, MapPin, Clock, Link as LinkIcon, BookOpen, Loader2, ChevronLeft, ChevronRight, Sun, FileText, Video, Bell, Image as ImageIcon, Settings, Check, X, Plus } from 'lucide-react';
+import { PublicClientApplication } from "@azure/msal-browser";
+
+// MSAL Initialization helper
+const initializeMsal = async (clientId) => {
+  const msalConfig = {
+    auth: {
+      clientId: clientId,
+      authority: "https://login.microsoftonline.com/common",
+      redirectUri: window.location.origin + window.location.pathname,
+    },
+    cache: {
+      cacheLocation: "sessionStorage",
+      storeAuthStateInCookie: false,
+    }
+  };
+  const pca = new PublicClientApplication(msalConfig);
+  await pca.initialize();
+  return pca;
+};
 
 export default function App() {
   const [events, setEvents] = useState([]);
@@ -17,13 +36,155 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [notifyStatus, setNotifyStatus] = useState(null);
 
+  // ใหม่: MSAL/Microsoft states
+  const [msClientId, setMsClientId] = useState(localStorage.getItem('ms_client_id') || '');
+  const [msAccount, setMsAccount] = useState(null);
+  const [msAccessToken, setMsAccessToken] = useState('');
+  const [isMsSyncing, setIsMsSyncing] = useState(false);
+
+  // ใหม่: State สำหรับกรอกข้อมูลเอง (Manual Entry)
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [manualEvent, setManualEvent] = useState({
+    eventName: '',
+    courseName: '',
+    topic: '',
+    date: '',
+    time: '',
+    location: '',
+    registerLink: '',
+    joinLink: '',
+  });
+  const [manualImageFile, setManualImageFile] = useState(null);
+
+  // Check active Microsoft session on startup
+  useEffect(() => {
+    const checkActiveSession = async () => {
+      if (!msClientId) return;
+      try {
+        const pca = await initializeMsal(msClientId);
+        const accounts = pca.getAllAccounts();
+        if (accounts.length > 0) {
+          pca.setActiveAccount(accounts[0]);
+          const response = await pca.acquireTokenSilent({
+            scopes: ["User.Read", "Calendars.ReadWrite"]
+          });
+          setMsAccount(accounts[0]);
+          setMsAccessToken(response.accessToken);
+        }
+      } catch (err) {
+        console.warn("Silent token acquisition failed, session expired:", err);
+      }
+    };
+    checkActiveSession();
+  }, [msClientId]);
+
+  // Microsoft Login / Logout handlers
+  const handleMicrosoftLogin = async () => {
+    if (!msClientId) {
+      setErrorMsg('กรุณากรอก Microsoft Client ID ในเมนูตั้งค่าก่อนเข้าสู่ระบบ');
+      setShowSettings(true);
+      return;
+    }
+    
+    setErrorMsg('');
+    setSuccessMsg('');
+    
+    try {
+      const pca = await initializeMsal(msClientId);
+      const loginRequest = {
+        scopes: ["User.Read", "Calendars.ReadWrite"],
+        prompt: "select_account"
+      };
+      
+      const response = await pca.loginPopup(loginRequest);
+      if (response && response.account) {
+        setMsAccount(response.account);
+        setMsAccessToken(response.accessToken);
+        setSuccessMsg(`เชื่อมต่อ Microsoft Account สำเร็จ: ${response.account.username}`);
+      }
+    } catch (err) {
+      console.error("Microsoft Login Error:", err);
+      setErrorMsg(`เข้าสู่ระบบ Microsoft ล้มเหลว: ${err.message || err}`);
+    }
+  };
+
+  const handleMicrosoftLogout = () => {
+    setMsAccount(null);
+    setMsAccessToken('');
+    setSuccessMsg('ออกจากระบบ Microsoft เรียบร้อยแล้ว');
+  };
+
+  // Direct Calendar Booking via Graph API
+  const bookDirectOutlook = async (event) => {
+    if (!msAccount || !msAccessToken) {
+      setErrorMsg('กรุณาเข้าสู่ระบบ Microsoft ก่อนดำเนินการซิงค์ตรง');
+      return;
+    }
+    
+    setIsMsSyncing(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    
+    try {
+      const { start, end } = parseEventDateTime(event.date, event.time);
+      const subject = event.eventName || event.courseName || 'อบรม SolarSync';
+      
+      const bodyContent = `คอร์ส: ${event.courseName || '-'}<br/>
+หัวข้อ: ${event.topic || '-'}<br/>
+เวลา: ${event.time || '-'}<br/>
+สถานที่: ${event.location || '-'}<br/>
+ลิงก์ลงทะเบียน: <a href="${event.registerLink}">${event.registerLink}</a><br/>
+ลิงก์เข้าอบรม: <a href="${event.joinLink}">${event.joinLink}</a><br/><br/>
+<i>บันทึกจาก SolarSync Training Booking</i>`;
+
+      const requestBody = {
+        subject: subject,
+        body: {
+          contentType: "HTML",
+          content: bodyContent
+        },
+        start: {
+          dateTime: start,
+          timeZone: "SE Asia Standard Time"
+        },
+        end: {
+          dateTime: end,
+          timeZone: "SE Asia Standard Time"
+        },
+        location: {
+          displayName: event.location || 'ไม่ได้ระบุสถานที่'
+        }
+      };
+      
+      const response = await fetch('https://graph.microsoft.com/v1.0/me/calendar/events', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${msAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      });
+      
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error?.message || `HTTP ${response.status}`);
+      }
+      
+      setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงในปฏิทิน Microsoft ของคุณเรียบร้อยแล้ว!`);
+    } catch (err) {
+      console.error("Microsoft Graph API Error:", err);
+      setErrorMsg(`บันทึกปฏิทินล้มเหลว: ${err.message || err}`);
+    } finally {
+      setIsMsSyncing(false);
+    }
+  };
+
   // ฟังก์ชันสำหรับเรียกใช้ Gemini API
   const analyzeImage = async (base64Image) => {
     setIsAnalyzing(true);
     setErrorMsg('');
     setSuccessMsg('');
     
-    // Read API key from environment variable or check if provided
     const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
@@ -83,12 +244,10 @@ export default function App() {
         if (extractedText) {
           const parsedData = JSON.parse(extractedText);
           if (parsedData.events && parsedData.events.length > 0) {
-            // นำ base64Image แนบเข้าไปในแต่ละ event ด้วย เพื่อนำไปแสดงผล
             const eventsWithImage = parsedData.events.map(e => ({ ...e, sourceImage: base64Image }));
             setEvents(prev => [...prev, ...eventsWithImage]);
             setSuccessMsg('ดึงข้อมูลและเพิ่มลงในปฏิทินเรียบร้อยแล้ว!');
             
-            // Set the selected date to the newly found event's date
             const newDate = new Date(parsedData.events[0].date);
             if (!isNaN(newDate)) {
                setCurrentMonth(newDate);
@@ -97,7 +256,7 @@ export default function App() {
           } else {
              setErrorMsg('ไม่พบข้อมูลการอบรมในรูปภาพนี้');
           }
-          break; // Success, exit retry loop
+          break;
         } else {
            throw new Error("No text extracted");
         }
@@ -107,7 +266,7 @@ export default function App() {
           setErrorMsg('เกิดข้อผิดพลาดในการวิเคราะห์รูปภาพ กรุณาลองใหม่อีกครั้ง');
         } else {
           await new Promise(resolve => setTimeout(resolve, delay));
-          delay *= 2; // Exponential backoff
+          delay *= 2;
         }
       }
     }
@@ -129,7 +288,6 @@ export default function App() {
       analyzeImage(reader.result);
     };
     reader.readAsDataURL(file);
-    // Reset file input
     e.target.value = null;
   };
 
@@ -138,11 +296,9 @@ export default function App() {
     if (!lineToken) return;
     
     try {
-      // Note: การยิง LINE Notify ตรงๆ จาก Browser อาจจะติด CORS 
-      // โค้ดนี้เป็นการเตรียมฟังก์ชันไว้ให้ หรือใช้โหมด no-cors เพื่อให้ยิงออกไปได้แม้ไม่มี Backend
       await fetch('https://notify-api.line.me/api/notify', {
         method: 'POST',
-        mode: 'no-cors', // เลี่ยง error จาก Browser (จะอ่าน Response ขากลับไม่ได้ แต่ส่งผ่าน)
+        mode: 'no-cors',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Authorization': `Bearer ${lineToken}`
@@ -150,11 +306,9 @@ export default function App() {
         body: new URLSearchParams({ message: message })
       });
 
-      // แจ้งสถานะ UI ในหน้าระบบ
       setNotifyStatus(`แจ้งเตือนเข้า LINE แล้ว: ${message.substring(0, 30)}...`);
       setTimeout(() => setNotifyStatus(null), 5000);
       
-      // จดจำว่าแจ้งเตือนอีเวนต์นี้ไปแล้ว จะได้ไม่สแปมซ้ำ
       setNotifiedLog(prev => {
         const newLog = new Set(prev);
         newLog.add(`${eventId}-${type}`);
@@ -178,21 +332,18 @@ export default function App() {
         
         const eventDate = new Date(event.date);
         const diffTime = eventDate.getTime() - now.getTime();
-        // คำนวณความต่างของวัน
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         const eventId = `event-${idx}-${event.date}`;
 
-        // 1. แจ้งเตือนล่วงหน้า x วัน
         if (diffDays === parseInt(notifyDays) && !notifiedLog.has(`${eventId}-advance`)) {
           sendLineNotify(`\n🔔 แจ้งเตือนล่วงหน้า ${notifyDays} วัน!\nคอร์ส: ${event.courseName || '-'}\nวันที่: ${event.date}`, eventId, 'advance');
         }
 
-        // 2. แจ้งเตือนเมื่อถึงวันและเวลา
         if (event.date === todayStr && !notifiedLog.has(`${eventId}-now`)) {
           sendLineNotify(`\n🚨 วันนี้มีคิวอบรม!\nคอร์ส: ${event.courseName || '-'}\nเวลา: ${event.time || '-'}\nลิงก์: ${event.joinLink || '-'}`, eventId, 'now');
         }
       });
-    }, 60000); // เช็คทุก 1 นาที
+    }, 60000);
 
     return () => clearInterval(checkSchedule);
   }, [events, lineToken, notifyDays, notifiedLog]);
@@ -211,7 +362,7 @@ export default function App() {
 
   const days = [];
   for (let i = 0; i < firstDay; i++) {
-    days.push(null); // Empty slots
+    days.push(null);
   }
   for (let i = 1; i <= daysInMonth; i++) {
     days.push(i);
@@ -327,10 +478,28 @@ export default function App() {
             <h1 className="text-xl font-bold tracking-tight text-slate-800">Solar<span className="text-orange-600">Sync</span> Training Booking</h1>
           </div>
           <div className="flex items-center gap-4">
+            {msAccount ? (
+              <div className="flex items-center gap-2 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-100 text-xs font-semibold">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></div>
+                <span className="hidden md:inline">{msAccount.username}</span>
+                <span className="md:hidden">MS Account</span>
+                <button onClick={handleMicrosoftLogout} className="text-slate-400 hover:text-red-500 font-bold ml-1" title="ออกจากระบบ Microsoft">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button 
+                onClick={handleMicrosoftLogin}
+                className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1.5 shadow-sm"
+              >
+                <Sun className="w-3.5 h-3.5" /> เชื่อมต่อ MS Calendar
+              </button>
+            )}
+
             <button 
               onClick={() => setShowSettings(!showSettings)}
-              className={`p-2 rounded-full transition-colors ${showSettings ? 'bg-green-100 text-green-600' : 'text-slate-500 hover:text-green-600 hover:bg-green-50'}`}
-              title="ตั้งค่าแจ้งเตือน LINE"
+              className={`p-2 rounded-full transition-colors ${showSettings ? 'bg-slate-200 text-slate-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-100'}`}
+              title="ตั้งค่าเชื่อมต่อภายนอก"
             >
               <Settings className="w-5 h-5" />
             </button>
@@ -354,53 +523,245 @@ export default function App() {
             </div>
           )}
 
-          {/* LINE Settings Panel */}
+          {/* Settings Panel */}
           {showSettings && (
-            <section className="bg-slate-800 text-white p-6 rounded-2xl shadow-md border border-slate-700 animate-in fade-in slide-in-from-top-4">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold flex items-center gap-2">
-                  <Bell className="w-5 h-5 text-green-400" /> ตั้งค่าการแจ้งเตือน LINE Notify
+            <section className="bg-slate-800 text-white p-6 rounded-2xl shadow-md border border-slate-700 animate-in fade-in slide-in-from-top-4 space-y-6">
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-lg font-semibold flex items-center gap-2">
+                    <Bell className="w-5 h-5 text-green-400" /> ตั้งค่าการแจ้งเตือน LINE Notify
+                  </h2>
+                  <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-1">LINE Notify Token</label>
+                    <input 
+                      type="password" 
+                      value={lineToken}
+                      onChange={(e) => setLineToken(e.target.value)}
+                      placeholder="วาง Token ของคุณที่นี่..."
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-green-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-1">แจ้งเตือนล่วงหน้า (วัน)</label>
+                    <input 
+                      type="number" 
+                      min="1"
+                      value={notifyDays}
+                      onChange={(e) => setNotifyDays(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-green-400"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 mt-2">*ระบบจะรันการตรวจสอบและยิงแจ้งเตือนอัตโนมัติ เมื่อเปิดหน้านี้ทิ้งไว้ในเบราว์เซอร์</p>
+              </div>
+
+              <div className="border-t border-slate-700 pt-4">
+                <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                  <Calendar className="w-5 h-5 text-blue-400" /> ตั้งค่าเชื่อมต่อ Microsoft Calendar
                 </h2>
-                <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-slate-300 mb-1">LINE Notify Token</label>
-                  <input 
-                    type="password" 
-                    value={lineToken}
-                    onChange={(e) => setLineToken(e.target.value)}
-                    placeholder="วาง Token ของคุณที่นี่..."
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-green-400"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-300 mb-1">แจ้งเตือนล่วงหน้า (วัน)</label>
-                  <input 
-                    type="number" 
-                    min="1"
-                    value={notifyDays}
-                    onChange={(e) => setNotifyDays(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-green-400"
-                  />
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-1">Application (client) ID</label>
+                    <input 
+                      type="text" 
+                      value={msClientId}
+                      onChange={(e) => {
+                        setMsClientId(e.target.value);
+                        localStorage.setItem('ms_client_id', e.target.value);
+                      }}
+                      placeholder="คัดลอก Client ID จาก Azure Portal มาวาง..."
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-400"
+                    />
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    *ต้องการรหัสเพื่อเปิดการทำงาน MS Authentication ในแอปพลิเคชัน SPA. 
+                    ตั้งค่า Redirect URIs ใน Azure AD: <code className="bg-slate-900 px-1 py-0.5 rounded text-blue-300">{window.location.origin + window.location.pathname}</code>
+                  </p>
                 </div>
               </div>
-              <p className="text-xs text-slate-400 mt-3">*ระบบจะรันการตรวจสอบและยิงแจ้งเตือนอัตโนมัติ เมื่อเปิดหน้านี้ทิ้งไว้ในเบราว์เซอร์</p>
             </section>
           )}
 
-          {/* Upload Section */}
+          {/* Upload & Manual Entry Section */}
           <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h2 className="text-lg font-semibold flex items-center gap-2">
-                <Upload className="w-5 h-5 text-orange-500" /> อัพโหลดตารางอบรม / โปสเตอร์
+                <Upload className="w-5 h-5 text-orange-500" /> จัดการตารางอบรม / โปสเตอร์
               </h2>
-              {uploadedImage && (
-                <button onClick={() => setUploadedImage(null)} className="text-sm text-slate-500 hover:text-red-500 flex items-center gap-1 transition-colors">
-                  <X className="w-4 h-4" /> ลบรูปภาพ
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setShowManualForm(!showManualForm)}
+                  className="text-sm bg-orange-50 hover:bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg border border-orange-200 transition-colors font-semibold flex items-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" /> กรอกข้อมูลเอง
                 </button>
-              )}
+                {uploadedImage && (
+                  <button onClick={() => setUploadedImage(null)} className="text-sm text-slate-500 hover:text-red-500 flex items-center gap-1 transition-colors font-semibold">
+                    <X className="w-4 h-4" /> ลบรูปภาพ
+                  </button>
+                )}
+              </div>
             </div>
+            
+            {showManualForm && (
+              <div className="mt-4 p-5 bg-slate-50 rounded-xl border border-slate-200 space-y-4 mb-4">
+                <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+                  <h3 className="text-sm font-bold text-slate-700">กรอกข้อมูลการอบรมด้วยตนเอง</h3>
+                  <button onClick={() => setShowManualForm(false)} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">ชื่องาน *</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={manualEvent.eventName}
+                      onChange={(e) => setManualEvent(prev => ({ ...prev, eventName: e.target.value }))}
+                      placeholder="เช่น สัมมนา C&I PV and BESS"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">ชื่อคอร์สอบรม *</label>
+                    <input 
+                      type="text" 
+                      required
+                      value={manualEvent.courseName}
+                      onChange={(e) => setManualEvent(prev => ({ ...prev, courseName: e.target.value }))}
+                      placeholder="เช่น C&I PV and BESS Course"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">หัวข้อ/เรื่อง</label>
+                    <input 
+                      type="text" 
+                      value={manualEvent.topic}
+                      onChange={(e) => setManualEvent(prev => ({ ...prev, topic: e.target.value }))}
+                      placeholder="เช่น การออกแบบระบบโซล่าร์เซลล์และแบตเตอรี่"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">วันที่อบรม *</label>
+                    <input 
+                      type="date" 
+                      required
+                      value={manualEvent.date}
+                      onChange={(e) => setManualEvent(prev => ({ ...prev, date: e.target.value }))}
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">เวลาอบรม</label>
+                    <input 
+                      type="text" 
+                      value={manualEvent.time}
+                      onChange={(e) => setManualEvent(prev => ({ ...prev, time: e.target.value }))}
+                      placeholder="เช่น 13:00 - 15:30 น."
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">สถานที่อบรม</label>
+                    <input 
+                      type="text" 
+                      value={manualEvent.location}
+                      onChange={(e) => setManualEvent(prev => ({ ...prev, location: e.target.value }))}
+                      placeholder="เช่น โรงแรมคราวน์ พลาซ่า หรือ Online Zoom"
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">ลิงก์ลงทะเบียน</label>
+                    <input 
+                      type="text" 
+                      value={manualEvent.registerLink}
+                      onChange={(e) => setManualEvent(prev => ({ ...prev, registerLink: e.target.value }))}
+                      placeholder="วางลิงก์ลงทะเบียน..."
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">ลิงก์เข้าอบรม</label>
+                    <input 
+                      type="text" 
+                      value={manualEvent.joinLink}
+                      onChange={(e) => setManualEvent(prev => ({ ...prev, joinLink: e.target.value }))}
+                      placeholder="วางลิงก์เข้า Zoom / Teams..."
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm text-slate-700 focus:outline-none focus:border-orange-500"
+                    />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">แนบรูปภาพ (ถ้ามี)</label>
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            setManualImageFile(reader.result);
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                      className="w-full text-xs text-slate-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      setShowManualForm(false);
+                      setManualEvent({ eventName: '', courseName: '', topic: '', date: '', time: '', location: '', registerLink: '', joinLink: '' });
+                      setManualImageFile(null);
+                    }}
+                    className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-sm font-semibold transition-colors"
+                  >
+                    ยกเลิก
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      if (!manualEvent.eventName || !manualEvent.date || !manualEvent.courseName) {
+                        setErrorMsg('กรุณากรอกข้อมูลที่จำเป็น (* ชื่องาน, ชื่อคอร์ส, วันที่)');
+                        return;
+                      }
+                      const newEvent = { 
+                        ...manualEvent, 
+                        sourceImage: manualImageFile 
+                      };
+                      setEvents(prev => [...prev, newEvent]);
+                      setSuccessMsg('เพิ่มงานอบรมเข้าสู่ปฏิทินเรียบร้อยแล้ว!');
+                      setCurrentMonth(new Date(manualEvent.date));
+                      setSelectedDate(manualEvent.date);
+                      setShowManualForm(false);
+                      setManualEvent({ eventName: '', courseName: '', topic: '', date: '', time: '', location: '', registerLink: '', joinLink: '' });
+                      setManualImageFile(null);
+                    }}
+                    className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-sm font-semibold transition-colors shadow-sm"
+                  >
+                    เพิ่มงานอบรม
+                  </button>
+                </div>
+              </div>
+            )}
             
             {uploadedImage ? (
               <div className="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex justify-center p-2 h-64">
@@ -570,14 +931,40 @@ export default function App() {
 
                       <div className="pt-4 mt-2 border-t border-slate-200 space-y-2">
                         <span className="text-slate-500 block text-xs mb-1 font-semibold">ซิงค์ไปยัง Microsoft Calendar</span>
-                        <div className="grid grid-cols-2 gap-2">
+                        
+                        {msAccount ? (
+                          <button 
+                            onClick={() => bookDirectOutlook(event)}
+                            disabled={isMsSyncing}
+                            className="flex items-center justify-center gap-2 w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300 transition-colors text-sm font-semibold shadow-sm"
+                          >
+                            {isMsSyncing ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" /> กำลังบันทึกลงปฏิทิน...
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-4 h-4" /> บันทึกลง MS Calendar ทันที
+                              </>
+                            )}
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={handleMicrosoftLogin}
+                            className="flex items-center justify-center gap-2 w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors text-sm font-semibold border border-slate-200"
+                          >
+                            <Sun className="w-4 h-4 text-blue-500" /> ล็อกอิน Microsoft เพื่อบันทึกด่วน
+                          </button>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-2 pt-1">
                           <a href={getOutlookCalendarLink(event, 'live')} target="_blank" rel="noreferrer"
                              className="flex items-center justify-center gap-1.5 py-1.5 px-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-xs font-medium border border-blue-100">
-                            <Calendar className="w-3.5 h-3.5 text-blue-500" /> Outlook (ส่วนตัว)
+                            <Calendar className="w-3.5 h-3.5 text-blue-500" /> Link Outlook (ส่วนตัว)
                           </a>
                           <a href={getOutlookCalendarLink(event, 'office365')} target="_blank" rel="noreferrer"
                              className="flex items-center justify-center gap-1.5 py-1.5 px-3 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors text-xs font-medium border border-indigo-100">
-                            <Calendar className="w-3.5 h-3.5 text-indigo-500" /> Microsoft 365
+                            <Calendar className="w-3.5 h-3.5 text-indigo-500" /> Link Microsoft 365
                           </a>
                         </div>
                         <button onClick={() => downloadICSFile(event)}
