@@ -147,7 +147,7 @@ export default function App() {
               bookingType: 'work',
               isGoogleEvent: true,
               id: item.id,
-              attachments: item.attachments || [] // บันทึกไฟล์แนบจากกูเกิล
+              attachments: item.attachments || []
             };
           });
           setGoogleEvents(mapped);
@@ -337,7 +337,7 @@ export default function App() {
       if (uploadSuccess && event.sourceImage) {
         setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงใน Google Calendar พร้อมไฟล์แนบภาพโปสเตอร์เรียบร้อยแล้ว!`);
       } else if (event.sourceImage) {
-        setErrorMsg(`บันทึกนัดหมายสำเร็จ แต่การแนบรูปภาพล้มเหลว: ${uploadErrorMessage} (กรุณาเปิดบริการ Google Drive API ใน Google Cloud Console)`);
+        setErrorMsg(`บันทึกนัดหมายสำเร็จ แต่การแนบรูปภาพล้มเหลว: ${uploadErrorMessage} (กรุณากรอกและเปิดบริการ Google Drive API)`);
       } else {
         setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงใน Google Calendar เรียบร้อยแล้ว!`);
       }
@@ -346,6 +346,79 @@ export default function App() {
     } catch (err) {
       console.error("Google Calendar API Error:", err);
       setErrorMsg(`บันทึกปฏิทินล้มเหลว: ${err.message || err}`);
+    } finally {
+      setIsGoogleSyncing(false);
+    }
+  };
+
+  // Direct Delete Event from Google Calendar
+  const deleteGoogleEvent = async (eventId) => {
+    if (!googleAccessToken) return;
+    if (!window.confirm("คุณต้องการลบกิจกรรมนี้ออกจาก Google Calendar ใช่หรือไม่?")) return;
+    
+    setIsGoogleSyncing(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${googleAccessToken}`
+        }
+      });
+      if (res.ok) {
+        setSuccessMsg("ลบกิจกรรมออกจาก Google Calendar เรียบร้อยแล้ว!");
+        fetchGoogleEvents(googleAccessToken);
+      } else {
+        const err = await res.json();
+        throw new Error(err.error?.message || `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.error("Error deleting Google event:", err);
+      setErrorMsg(`ลบกิจกรรมล้มเหลว: ${err.message || err}`);
+    } finally {
+      setIsGoogleSyncing(false);
+    }
+  };
+
+  // Direct Patch/Update Date and Time on Google Calendar
+  const updateGoogleEventDateTime = async (event, newDate, newTime) => {
+    if (!googleAccessToken) return;
+    setIsGoogleSyncing(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const { start, end } = parseEventDateTime(newDate, newTime);
+      
+      const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${event.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${googleAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          start: {
+            dateTime: start,
+            timeZone: "Asia/Bangkok"
+          },
+          end: {
+            dateTime: end,
+            timeZone: "Asia/Bangkok"
+          }
+        })
+      });
+      
+      if (res.ok) {
+        setSuccessMsg("อัปเดตวันและเวลาใน Google Calendar เรียบร้อยแล้ว!");
+        setSelectedDate(newDate);
+        fetchGoogleEvents(googleAccessToken);
+      } else {
+        const err = await res.json();
+        throw new Error(err.error?.message || `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.error("Error updating Google event date/time:", err);
+      setErrorMsg(`อัปเดตวันและเวลาล้มเหลว: ${err.message || err}`);
     } finally {
       setIsGoogleSyncing(false);
     }
@@ -1216,9 +1289,22 @@ export default function App() {
               </div>
             ) : (
               <div className="space-y-6">
-                <div className="text-sm text-slate-500 mb-2 font-semibold bg-slate-50 inline-block px-3 py-1 rounded-full border border-slate-200">
+                
+                {/* Clickable Date Badge to edit the first event of the day directly */}
+                <button 
+                  onClick={() => {
+                    if (selectedDateEvents.length > 0) {
+                      const firstEv = selectedDateEvents[0];
+                      setEditingEvent(firstEv);
+                      setEditDate(firstEv.date);
+                      setEditTime(firstEv.time || '');
+                    }
+                  }}
+                  className="text-sm text-slate-500 mb-2 font-semibold bg-slate-50 hover:bg-slate-100 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-slate-200 cursor-pointer transition-colors"
+                  title="คลิกเพื่อแก้ไขวัน/เวลาของกิจกรรมนี้"
+                >
                   วันที่: {formatDisplayDate(selectedDate)}
-                </div>
+                </button>
                 
                 {selectedDateEvents.map((event, idx) => {
                   const isPersonal = event.bookingType === 'personal';
@@ -1236,7 +1322,28 @@ export default function App() {
                         </span>
                         
                         <div className="flex gap-2 text-xs">
-                          {!event.isGoogleEvent && (
+                          {event.isGoogleEvent ? (
+                            <>
+                              <button 
+                                onClick={() => {
+                                  setEditingEvent(event);
+                                  setEditDate(event.date);
+                                  setEditTime(event.time || '');
+                                }}
+                                className="text-slate-500 hover:text-slate-700 underline font-semibold transition-colors"
+                              >
+                                แก้ไขวัน/เวลา
+                              </button>
+                              <span className="text-slate-300">|</span>
+                              <button 
+                                onClick={() => deleteGoogleEvent(event.id)}
+                                className="text-red-500 hover:text-red-700 underline font-semibold transition-colors"
+                              >
+                                ลบ
+                              </button>
+                              <span className="text-slate-300">|</span>
+                            </>
+                          ) : (
                             <>
                               <button 
                                 onClick={() => {
@@ -1349,15 +1456,19 @@ export default function App() {
                             <button 
                               onClick={() => {
                                 if (!editDate) return;
-                                setEvents(prev => prev.map(ev => {
-                                  if (ev === event) {
-                                    return { ...ev, date: editDate, time: editTime };
-                                  }
-                                  return ev;
-                                }));
-                                setSelectedDate(editDate);
+                                if (event.isGoogleEvent) {
+                                  updateGoogleEventDateTime(event, editDate, editTime);
+                                } else {
+                                  setEvents(prev => prev.map(ev => {
+                                    if (ev === event) {
+                                      return { ...ev, date: editDate, time: editTime };
+                                    }
+                                    return ev;
+                                  }));
+                                  setSelectedDate(editDate);
+                                  setSuccessMsg('อัปเดตวันและเวลาเรียบร้อยแล้ว');
+                                }
                                 setEditingEvent(null);
-                                setSuccessMsg('อัปเดตวันและเวลาเรียบร้อยแล้ว');
                               }}
                               className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold"
                             >
@@ -1384,15 +1495,23 @@ export default function App() {
                             )}
                             
                             <div className="grid grid-cols-2 gap-4">
-                              {event.time && (
-                                <div className="flex items-start gap-2">
-                                  <Clock className="w-4 h-4 text-slate-400 mt-0.5" />
-                                  <div>
-                                    <span className="text-slate-500 block text-xs">เวลา</span>
-                                    <span className="font-semibold text-slate-700">{event.time}</span>
-                                  </div>
+                              {/* Clickable time section to quickly edit */}
+                              <div 
+                                onClick={() => {
+                                  setEditingEvent(event);
+                                  setEditDate(event.date);
+                                  setEditTime(event.time || '');
+                                }}
+                                className="flex items-start gap-2 cursor-pointer hover:bg-slate-100/50 p-1.5 rounded transition-colors"
+                                title="คลิกเพื่อแก้ไขเวลาด่วน"
+                              >
+                                <Clock className="w-4 h-4 text-slate-400 mt-0.5" />
+                                <div>
+                                  <span className="text-slate-500 block text-xs">เวลา (คลิกเพื่อแก้)</span>
+                                  <span className="font-semibold text-slate-700">{event.time || 'ไม่ได้ระบุเวลา'}</span>
                                 </div>
-                              )}
+                              </div>
+                              
                               {event.location && (
                                 <div className="flex items-start gap-2">
                                   <MapPin className="w-4 h-4 text-slate-400 mt-0.5" />
