@@ -35,9 +35,115 @@ const formatDisplayDate = (dateStr) => {
   });
 };
 
+// iCalendar (.ics) Parser Helper
+const parseICS = (icsText) => {
+  const eventsList = [];
+  const lines = icsText.split(/\r?\n/);
+  let currentEvent = null;
+  let inEvent = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    
+    // Handle folded lines
+    while (i + 1 < lines.length && (lines[i+1].startsWith(' ') || lines[i+1].startsWith('\t'))) {
+      line += lines[i+1].substring(1);
+      i++;
+    }
+
+    if (line.startsWith('BEGIN:VEVENT')) {
+      currentEvent = {};
+      inEvent = true;
+    } else if (line.startsWith('END:VEVENT')) {
+      if (currentEvent && currentEvent.dtstart) {
+        const dtstartRaw = currentEvent.dtstart;
+        const dtendRaw = currentEvent.dtend || dtstartRaw;
+        
+        const dateMatch = dtstartRaw.match(/(\d{4})(\d{2})(\d{2})/);
+        if (dateMatch) {
+          const y = dateMatch[1];
+          const m = dateMatch[2];
+          const d = dateMatch[3];
+          const dateStr = `${y}-${m}-${d}`;
+          
+          let timeStr = 'ทั้งวัน';
+          const timeMatchStart = dtstartRaw.match(/T(\d{2})(\d{2})/);
+          if (timeMatchStart) {
+            const sh = timeMatchStart[1];
+            const sm = timeMatchStart[2];
+            let eh = String(parseInt(sh) + 1).padStart(2, '0');
+            let em = sm;
+            
+            if (dtendRaw) {
+              const timeMatchEnd = dtendRaw.match(/T(\d{2})(\d{2})/);
+              if (timeMatchEnd) {
+                eh = timeMatchEnd[1];
+                em = timeMatchEnd[2];
+              }
+            }
+            
+            if (dtstartRaw.endsWith('Z')) {
+              // Convert UTC to local (+07:00 SE Asia)
+              const utcDate = new Date(`${y}-${m}-${d}T${sh}:${sm}:00Z`);
+              const localY = utcDate.getFullYear();
+              const localM = String(utcDate.getMonth() + 1).padStart(2, '0');
+              const localD = String(utcDate.getDate()).padStart(2, '0');
+              const localSH = String(utcDate.getHours()).padStart(2, '0');
+              const localSM = String(utcDate.getMinutes()).padStart(2, '0');
+              
+              const localEndDate = new Date(`${y}-${m}-${d}T${eh}:${em}:00Z`);
+              const localEH = String(localEndDate.getHours()).padStart(2, '0');
+              const localEM = String(localEndDate.getMinutes()).padStart(2, '0');
+              
+              currentEvent.date = `${localY}-${localM}-${localD}`;
+              timeStr = `${localSH}:${localSM} - ${localEH}:${localEM} น.`;
+            } else {
+              currentEvent.date = dateStr;
+              timeStr = `${sh}:${sm} - ${eh}:${em} น.`;
+            }
+          } else {
+            currentEvent.date = dateStr;
+          }
+          
+          eventsList.push({
+            eventName: currentEvent.summary || 'ไม่มีชื่องาน',
+            topic: currentEvent.description || '',
+            date: currentEvent.date,
+            time: timeStr,
+            location: currentEvent.location || '',
+            bookingType: 'work',
+            isMsEvent: true, // Tag it so we style it as Microsoft event
+            id: currentEvent.uid || String(Math.random())
+          });
+        }
+      }
+      inEvent = false;
+      currentEvent = null;
+    } else if (inEvent) {
+      if (line.startsWith('SUMMARY:')) {
+        currentEvent.summary = line.substring(8).replace(/\\,/g, ',').replace(/\\;/g, ';');
+      } else if (line.startsWith('DESCRIPTION:')) {
+        currentEvent.description = line.substring(12).replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\;/g, ';');
+      } else if (line.startsWith('LOCATION:')) {
+        currentEvent.location = line.substring(9).replace(/\\,/g, ',').replace(/\\;/g, ';');
+      } else if (line.startsWith('DTSTART')) {
+        const parts = line.split(':');
+        currentEvent.dtstart = parts[parts.length - 1];
+      } else if (line.startsWith('DTEND')) {
+        const parts = line.split(':');
+        currentEvent.dtend = parts[parts.length - 1];
+      } else if (line.startsWith('UID:')) {
+        currentEvent.uid = line.substring(4);
+      }
+    }
+  }
+  return eventsList;
+};
+
 export default function App() {
   const [events, setEvents] = useState([]);
-  const [msEvents, setMsEvents] = useState([]); // ดึงกิจกรรมจาก Microsoft Calendar
+  const [msEvents, setMsEvents] = useState([]); // กิจกรรมจาก MSAL OAuth
+  const [icsEvents, setIcsEvents] = useState([]); // กิจกรรมจาก Public ICS Link
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
@@ -59,6 +165,9 @@ export default function App() {
   const [msAccount, setMsAccount] = useState(null);
   const [msAccessToken, setMsAccessToken] = useState('');
   const [isMsSyncing, setIsMsSyncing] = useState(false);
+
+  // Public ICS Settings States
+  const [publicIcsUrl, setPublicIcsUrl] = useState(localStorage.getItem('public_ics_url') || 'https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc3701532525596967654/calendar.ics');
 
   // Manual Event Form States
   const [showManualForm, setShowManualForm] = useState(false);
@@ -100,6 +209,10 @@ export default function App() {
       localStorage.setItem('line_user_id', 'gung1125');
       setLineUserId('gung1125');
     }
+    if (!localStorage.getItem('public_ics_url')) {
+      localStorage.setItem('public_ics_url', 'https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc3701532525596967654/calendar.ics');
+      setPublicIcsUrl('https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc3701532525596967654/calendar.ics');
+    }
   }, []);
 
   // Check active Microsoft session on startup
@@ -124,11 +237,10 @@ export default function App() {
     checkActiveSession();
   }, [msClientId, msTenantId]);
 
-  // Fetch Microsoft Calendar Events
+  // Fetch Microsoft Calendar Events via MSAL OAuth
   const fetchMicrosoftEvents = async () => {
     if (!msAccessToken) return;
     try {
-      // ดึงนัดหมาย 100 รายการล่าสุด
       const response = await fetch('https://graph.microsoft.com/v1.0/me/calendar/events?$top=100&$select=subject,start,end,location,bodyPreview', {
         headers: {
           'Authorization': `Bearer ${msAccessToken}`,
@@ -153,8 +265,8 @@ export default function App() {
             date: startDateStr,
             time: `${startTimeStr} - ${endTimeStr} น.`,
             location: item.location?.displayName || '',
-            bookingType: 'work', // ดึงมาเป็นงานจัดประเภทที่ทำงาน
-            isMsEvent: true,     // ทำเครื่องหมายว่าเป็นกิจกรรมของระบบ Microsoft
+            bookingType: 'work',
+            isMsEvent: true,
             id: item.id
           };
         });
@@ -162,6 +274,20 @@ export default function App() {
       }
     } catch (err) {
       console.error("Error fetching MS events:", err);
+    }
+  };
+
+  // Fetch Microsoft Calendar Events via Public ICS Link (CORS bypassed via Proxy)
+  const fetchIcsEvents = async () => {
+    if (!publicIcsUrl) return;
+    try {
+      const response = await fetch(`https://corsproxy.io/?${publicIcsUrl}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      const parsed = parseICS(text);
+      setIcsEvents(parsed);
+    } catch (err) {
+      console.error("Error fetching public ICS events:", err);
     }
   };
 
@@ -173,6 +299,11 @@ export default function App() {
       setMsEvents([]);
     }
   }, [msAccessToken]);
+
+  // Sync public ICS events on load/update
+  useEffect(() => {
+    fetchIcsEvents();
+  }, [publicIcsUrl]);
 
   // Microsoft Login / Logout handlers
   const handleMicrosoftLogin = async () => {
@@ -270,8 +401,8 @@ export default function App() {
       }
       
       setSuccessMsg(`บันทึกชื่องาน "${subject}" ลงในปฏิทิน Microsoft ของคุณเรียบร้อยแล้ว!`);
-      // ดึงข้อมูลกิจกรรมล่าสุดจาก MS Calendar อีกรอบเพื่ออัปเดตบนหน้าปฏิทิน
       fetchMicrosoftEvents();
+      fetchIcsEvents();
     } catch (err) {
       console.error("Microsoft Graph API Error:", err);
       setErrorMsg(`บันทึกปฏิทินล้มเหลว: ${err.message || err}`);
@@ -486,11 +617,22 @@ export default function App() {
     days.push(i);
   }
 
-  // รวมกิจกรรมทั้ง Local และ Microsoft Calendar
+  // รวมกิจกรรมทั้ง Local, Microsoft Calendar (OAuth), และ Public ICS Feed
   const getEventsForDate = (dateStr) => {
     const local = events.filter(e => e.date === dateStr);
     const ms = msEvents.filter(e => e.date === dateStr);
-    return [...local, ...ms];
+    const ics = icsEvents.filter(e => e.date === dateStr);
+
+    const merged = [...local, ...ms];
+    // เลี่ยงแสดงกิจกรรมซ้ำกัน (เทียบชื่องานและวันที่)
+    ics.forEach(ie => {
+      const exists = merged.some(me => me.eventName === ie.eventName && me.date === ie.date);
+      if (!exists) {
+        merged.push(ie);
+      }
+    });
+    
+    return merged;
   };
 
   const formatDateString = (year, month, day) => {
@@ -697,9 +839,34 @@ export default function App() {
                 <p className="text-xs text-slate-400 mt-2">*ส่งผ่านระบบ Proxy เพื่อเลี่ยงข้อจำกัด CORS ฝั่งเบราว์เซอร์ และแจ้งเตือนตรงถึง User ID ของคุณ</p>
               </div>
 
+              {/* Public Calendar URL Setup */}
               <div className="border-t border-slate-700 pt-4">
                 <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                  <Calendar className="w-5 h-5 text-blue-400" /> ตั้งค่าเชื่อมต่อ Microsoft Calendar
+                  <LinkIcon className="w-5 h-5 text-sky-400" /> เชื่อมต่อผ่าน ลิงก์ปฏิทินสาธารณะ (.ics)
+                </h2>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm text-slate-300 mb-1">ลิงก์ปฏิทิน ICS ที่เผยแพร่</label>
+                    <input 
+                      type="text" 
+                      value={publicIcsUrl}
+                      onChange={(e) => {
+                        setPublicIcsUrl(e.target.value);
+                        localStorage.setItem('public_ics_url', e.target.value);
+                      }}
+                      placeholder="วางลิงก์ ICS เช่น https://outlook.office365.com/.../calendar.ics"
+                      className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-sky-400"
+                    />
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    *เมื่อระบุลิงก์ ICS นี้ ระบบจะคอยดึงนัดหมายทั้งหมดจาก Microsoft Calendar ของคุณมาแสดงโดยอัตโนมัติ (ไม่ต้องกดล็อกอินทุกครั้งและเลี่ยงข้อจำกัดล็อกอินด้วยองค์กร)
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-700 pt-4">
+                <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                  <Calendar className="w-5 h-5 text-blue-400" /> ตั้งค่าเชื่อมต่อ Microsoft Calendar (ผ่าน API App Registration)
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
                   <div>
@@ -1026,7 +1193,6 @@ export default function App() {
                   dayBgClass = 'ring-2 ring-slate-800 ring-offset-2 font-bold z-10';
                 }
                 
-                // Color coding for day background based on event types present
                 let itemBg = '';
                 if (hasWork && hasPersonal) {
                   itemBg = 'bg-purple-50 hover:bg-purple-100 border border-purple-100 text-purple-900';
@@ -1035,7 +1201,6 @@ export default function App() {
                 } else if (hasPersonal) {
                   itemBg = 'bg-orange-50 hover:bg-orange-100 border border-orange-100 text-orange-900';
                 } else if (hasMsCalendarEvent) {
-                  // Microsoft Calendar events color code (light sky blue)
                   itemBg = 'bg-sky-50 hover:bg-sky-100 border border-sky-100 text-sky-900';
                 } else if (isToday) {
                   itemBg = 'bg-slate-100 font-bold text-slate-900';
@@ -1100,13 +1265,16 @@ export default function App() {
                  <FileText className="w-5 h-5 text-blue-500" /> 
                  รายละเอียดนัดหมาย
               </h2>
-              {msAccount && (
+              {(msAccount || publicIcsUrl) && (
                 <button 
-                  onClick={fetchMicrosoftEvents}
+                  onClick={() => {
+                    if (msAccessToken) fetchMicrosoftEvents();
+                    if (publicIcsUrl) fetchIcsEvents();
+                  }}
                   className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded border border-blue-100"
-                  title="รีเฟรช MS Calendar"
+                  title="รีเฟรชข้อมูลปฏิทินทั้งหมด"
                 >
-                  🔄 โหลด MS Calendar ใหม่
+                  🔄 ดึงข้อมูลใหม่
                 </button>
               )}
             </div>
