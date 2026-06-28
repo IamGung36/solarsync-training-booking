@@ -167,7 +167,7 @@ export default function App() {
   const [isMsSyncing, setIsMsSyncing] = useState(false);
 
   // Public ICS Settings States
-  const [publicIcsUrl, setPublicIcsUrl] = useState(localStorage.getItem('public_ics_url') || 'https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc3701532525596967654/calendar.ics');
+  const [publicIcsUrl, setPublicIcsUrl] = useState(localStorage.getItem('public_ics_url') || 'https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc37015325255969967654/calendar.ics');
 
   // Manual Event Form States
   const [showManualForm, setShowManualForm] = useState(false);
@@ -209,9 +209,10 @@ export default function App() {
       localStorage.setItem('line_user_id', 'gung1125');
       setLineUserId('gung1125');
     }
-    if (!localStorage.getItem('public_ics_url')) {
-      localStorage.setItem('public_ics_url', 'https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc3701532525596967654/calendar.ics');
-      setPublicIcsUrl('https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc3701532525596967654/calendar.ics');
+    const curIcs = localStorage.getItem('public_ics_url');
+    if (!curIcs || curIcs === 'https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc3701532525596967654/calendar.ics') {
+      localStorage.setItem('public_ics_url', 'https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc37015325255969967654/calendar.ics');
+      setPublicIcsUrl('https://outlook.office365.com/owa/calendar/43e873600d18487fa358ff77ed6cf2b0@getzenergy.co.th/82bd652c366b4cfba839b9f049023bc37015325255969967654/calendar.ics');
     }
   }, []);
 
