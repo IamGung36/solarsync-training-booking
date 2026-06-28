@@ -278,18 +278,50 @@ export default function App() {
     }
   };
 
-  // Fetch Microsoft Calendar Events via Public ICS Link (CORS bypassed via Proxy)
+  // Fetch Microsoft Calendar Events via Public ICS Link (CORS bypassed via Proxy with fallback)
   const fetchIcsEvents = async () => {
     if (!publicIcsUrl) return;
-    try {
-      const response = await fetch(`https://corsproxy.io/?${publicIcsUrl}`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const text = await response.text();
-      const parsed = parseICS(text);
-      setIcsEvents(parsed);
-    } catch (err) {
-      console.error("Error fetching public ICS events:", err);
+    setErrorMsg('');
+    setSuccessMsg('');
+    setIsMsSyncing(true);
+    
+    const proxies = [
+      `https://corsproxy.io/?`,
+      `https://api.allorigins.win/raw?url=`
+    ];
+    
+    let success = false;
+    let errorDetail = '';
+    
+    for (const proxy of proxies) {
+      try {
+        const fetchUrl = proxy.includes('allorigins') 
+          ? `${proxy}${encodeURIComponent(publicIcsUrl)}` 
+          : `${proxy}${publicIcsUrl}`;
+          
+        const response = await fetch(fetchUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        
+        const parsed = parseICS(text);
+        if (parsed.length > 0) {
+          setIcsEvents(parsed);
+          setSuccessMsg(`ดึงข้อมูลปฏิทินสำเร็จ! พบกิจกรรมทั้งหมด ${parsed.length} รายการ`);
+          success = true;
+          break;
+        } else {
+          throw new Error("ดึงไฟล์ปฏิทินสำเร็จ แต่ไม่พบข้อมูลการนัดหมายที่ตรงกับรูปแบบ");
+        }
+      } catch (err) {
+        console.warn(`Proxy ${proxy} failed:`, err);
+        errorDetail = err.message || String(err);
+      }
     }
+    
+    if (!success) {
+      setErrorMsg(`ดึงข้อมูลปฏิทินล้มเหลว: ${errorDetail}`);
+    }
+    setIsMsSyncing(false);
   };
 
   // Sync MS Calendar events whenever msAccessToken is set/updated
@@ -1272,10 +1304,19 @@ export default function App() {
                     if (msAccessToken) fetchMicrosoftEvents();
                     if (publicIcsUrl) fetchIcsEvents();
                   }}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded border border-blue-100"
+                  disabled={isMsSyncing}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 bg-blue-50 px-2 py-1 rounded border border-blue-100 disabled:opacity-50"
                   title="รีเฟรชข้อมูลปฏิทินทั้งหมด"
                 >
-                  🔄 ดึงข้อมูลใหม่
+                  {isMsSyncing ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> กำลังดึงข้อมูล...
+                    </>
+                  ) : (
+                    <>
+                      🔄 ดึงข้อมูลใหม่
+                    </>
+                  )}
                 </button>
               )}
             </div>
