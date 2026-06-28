@@ -227,6 +227,96 @@ export default function App() {
 
   const selectedDateEvents = selectedDate ? getEventsForDate(selectedDate) : [];
 
+  // Parse event date and time into start/end format for Outlook/ICS
+  const parseEventDateTime = (dateStr, timeStr) => {
+    if (!dateStr) return { start: '', end: '' };
+    
+    let startHour = "09";
+    let startMin = "00";
+    let endHour = "17";
+    let endMin = "00";
+    
+    if (timeStr) {
+      const times = timeStr.match(/(\d{1,2})[:.](\d{2})/g);
+      if (times && times.length >= 1) {
+        const startParts = times[0].split(/[:.]/);
+        startHour = startParts[0].padStart(2, '0');
+        startMin = startParts[1].padStart(2, '0');
+        
+        if (times.length >= 2) {
+          const endParts = times[1].split(/[:.]/);
+          endHour = endParts[0].padStart(2, '0');
+          endMin = endParts[1].padStart(2, '0');
+        } else {
+          const hourNum = parseInt(startHour);
+          endHour = String(hourNum >= 23 ? 23 : hourNum + 1).padStart(2, '0');
+          endMin = startMin;
+        }
+      }
+    }
+    
+    return {
+      start: `${dateStr}T${startHour}:${startMin}:00`,
+      end: `${dateStr}T${endHour}:${endMin}:00`
+    };
+  };
+
+  const getOutlookCalendarLink = (event, platform) => {
+    const { start, end } = parseEventDateTime(event.date, event.time);
+    
+    const baseUrl = platform === 'office365' 
+      ? 'https://outlook.office.com/calendar/deeplink/compose' 
+      : 'https://outlook.live.com/calendar/deeplink/compose';
+      
+    const subject = encodeURIComponent(event.eventName || event.courseName || 'อบรม SolarSync');
+    const bodyText = `คอร์ส: ${event.courseName || '-'}\nหัวข้อ: ${event.topic || '-'}\nเวลา: ${event.time || '-'}\nสถานที่: ${event.location || '-'}\nลิงก์เข้าอบรม: ${event.joinLink || '-'}\nลิงก์ลงทะเบียน: ${event.registerLink || '-'}\n\nบันทึกจาก SolarSync Training Booking`;
+    const body = encodeURIComponent(bodyText);
+    const location = encodeURIComponent(event.location || '');
+    
+    return `${baseUrl}?path=/calendar/action/compose&rru=addevent&subject=${subject}&startdt=${start}&enddt=${end}&body=${body}&location=${location}`;
+  };
+
+  const formatToICSDateTime = (dateTimeStr) => {
+    return dateTimeStr.replace(/[-:]/g, '');
+  };
+
+  const downloadICSFile = (event) => {
+    const { start, end } = parseEventDateTime(event.date, event.time);
+    const icsStart = formatToICSDateTime(start);
+    const icsEnd = formatToICSDateTime(end);
+    const timestamp = formatToICSDateTime(new Date().toISOString().split('.')[0].replace('Z', ''));
+    
+    const subject = event.eventName || event.courseName || 'อบรม SolarSync';
+    const description = `คอร์ส: ${event.courseName || '-'}\\nหัวข้อ: ${event.topic || '-'}\\nเวลา: ${event.time || '-'}\\nสถานที่: ${event.location || '-'}\\nลิงก์เข้าอบรม: ${event.joinLink || '-'}\\nลิงก์ลงทะเบียน: ${event.registerLink || '-'}`;
+    const location = event.location || '';
+    
+    const icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//SolarSync//Calendar Event//EN',
+      'CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT',
+      `UID:${Date.now()}@solarsync`,
+      `DTSTAMP:${timestamp}`,
+      `DTSTART:${icsStart}`,
+      `DTEND:${icsEnd}`,
+      `SUMMARY:${subject}`,
+      `DESCRIPTION:${description}`,
+      `LOCATION:${location}`,
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ].join('\n');
+    
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${subject.replace(/[^a-zA-Z0-9ก-๙]/g, '_')}.ics`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans selection:bg-orange-200">
       {/* Header */}
@@ -466,16 +556,34 @@ export default function App() {
                       <div className="pt-4 mt-2 border-t border-slate-200 space-y-2">
                         {event.registerLink && (
                           <a href={event.registerLink.startsWith('http') ? event.registerLink : `https://${event.registerLink}`} target="_blank" rel="noreferrer" 
-                             className="flex items-center justify-center gap-2 w-full py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 hover:text-orange-600 transition-colors">
+                             className="flex items-center justify-center gap-2 w-full py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 hover:text-orange-600 transition-colors font-medium">
                             <LinkIcon className="w-4 h-4" /> ลิ้งค์ลงทะเบียน
                           </a>
                         )}
                         {event.joinLink && (
                           <a href={event.joinLink.startsWith('http') ? event.joinLink : `https://${event.joinLink}`} target="_blank" rel="noreferrer"
-                             className="flex items-center justify-center gap-2 w-full py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 shadow-sm shadow-orange-200 transition-colors">
+                             className="flex items-center justify-center gap-2 w-full py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 shadow-sm shadow-orange-200 transition-colors font-medium">
                             <Video className="w-4 h-4" /> ลิ้งค์เข้าอบรม
                           </a>
                         )}
+                      </div>
+
+                      <div className="pt-4 mt-2 border-t border-slate-200 space-y-2">
+                        <span className="text-slate-500 block text-xs mb-1 font-semibold">ซิงค์ไปยัง Microsoft Calendar</span>
+                        <div className="grid grid-cols-2 gap-2">
+                          <a href={getOutlookCalendarLink(event, 'live')} target="_blank" rel="noreferrer"
+                             className="flex items-center justify-center gap-1.5 py-1.5 px-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors text-xs font-medium border border-blue-100">
+                            <Calendar className="w-3.5 h-3.5 text-blue-500" /> Outlook (ส่วนตัว)
+                          </a>
+                          <a href={getOutlookCalendarLink(event, 'office365')} target="_blank" rel="noreferrer"
+                             className="flex items-center justify-center gap-1.5 py-1.5 px-3 bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors text-xs font-medium border border-indigo-100">
+                            <Calendar className="w-3.5 h-3.5 text-indigo-500" /> Microsoft 365
+                          </a>
+                        </div>
+                        <button onClick={() => downloadICSFile(event)}
+                                className="flex items-center justify-center gap-2 w-full py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors text-sm font-medium border border-slate-200">
+                          <FileText className="w-4 h-4 text-slate-500" /> ดาวน์โหลดไฟล์ปฏิทิน (.ics)
+                        </button>
                       </div>
                     </div>
                   </div>
