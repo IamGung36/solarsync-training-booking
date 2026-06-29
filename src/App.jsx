@@ -1300,10 +1300,13 @@ export default function App() {
                       setEditTime(firstEv.time || '');
                     }
                   }}
-                  className="text-sm text-slate-500 mb-2 font-semibold bg-slate-50 hover:bg-slate-100 inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-slate-200 cursor-pointer transition-colors"
-                  title="คลิกเพื่อแก้ไขวัน/เวลาของกิจกรรมนี้"
+                  className="text-sm text-slate-500 mb-2 font-semibold bg-slate-50 hover:bg-slate-100 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-slate-200 cursor-pointer transition-colors shadow-sm"
+                  title="คลิกเพื่อแก้ไขวัน/เวลาของกิจกรรมในวันนี้"
                 >
-                  วันที่: {formatDisplayDate(selectedDate)}
+                  <span>📅 วันที่: {formatDisplayDate(selectedDate)}</span>
+                  <span className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-0.5 border-l border-slate-200 pl-2 font-bold">
+                    ✏️ แก้ไขวัน/เวลา
+                  </span>
                 </button>
                 
                 {selectedDateEvents.map((event, idx) => {
